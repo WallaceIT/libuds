@@ -52,9 +52,9 @@ typedef struct __uds_context
     struct timespec timestamp;
 
     unsigned int loglevel;
-    uint8_t current_session;
+    const uds_session_cfg_t *current_session;
     uint8_t current_sa_seed;
-    uint8_t current_sa_level;
+    const uds_sa_cfg_t *current_sa_level;
 
     uint8_t response_buffer[4096];
 } uds_context_t;
