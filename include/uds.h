@@ -62,6 +62,26 @@ struct __uds_config_ecureset
     uds_security_cfg_t sec_reset_sss;
 };
 
+typedef int (*uds_dtc_settings_onoff_cb_t)(void *priv,
+                                           const uint8_t *data, size_t data_len);
+typedef int (*uds_dtc_settings_s_cb_t)(void *priv, uint8_t dtc_setting_type,
+                                       const uint8_t *data, size_t data_len);
+
+struct __uds_config_dtc_settings
+{
+    uds_dtc_settings_onoff_cb_t cb_dtc_on;
+    uds_security_cfg_t sec_dtc_on;
+
+    uds_dtc_settings_onoff_cb_t cb_dtc_off;
+    uds_security_cfg_t sec_dtc_off;
+
+    uds_dtc_settings_s_cb_t cb_dtc_settings_vms;
+    uds_security_cfg_t sec_dtc_settings_vms;
+
+    uds_dtc_settings_s_cb_t cb_dtc_settings_sss;
+    uds_security_cfg_t sec_dtc_settings_sss;
+};
+
 typedef int (*uds_send_cb_t)(void *priv, const uint8_t data[], size_t len);
 
 typedef struct __uds_config
@@ -78,6 +98,7 @@ typedef struct __uds_config
     unsigned long num_sa_config;
 
     struct __uds_config_ecureset ecureset;
+    struct __uds_config_dtc_settings dtc_settings;
 
 } uds_config_t;
 

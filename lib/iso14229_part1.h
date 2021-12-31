@@ -116,6 +116,10 @@
 // DTC setting types (sub-functions of UDS_SVC_CDTCS)
 #define UDS_LEV_DTCSTP_ON       0x01 // On
 #define UDS_LEV_DTCSTP_OFF      0x02 // Off
+#define UDS_LEV_DTCSTP_VMS_MIN  0x40 // Vehicle Manufacturer Specific
+#define UDS_LEV_DTCSTP_VMS_MAX  0x5F
+#define UDS_LEV_DTCSTP_SSS_MIN  0x60 // System Supplier Specific
+#define UDS_LEV_DTCSTP_SSS_MAX  0x7E
 
 // Event types (sub-function of UDS_SVC_ROE)
 #define UDS_LEV_ETP_STRPOE      0x00 // Stop Response On Event

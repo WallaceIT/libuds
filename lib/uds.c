@@ -332,11 +332,11 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
     uint8_t sr = 0x00;
     uint8_t sa_index = __UDS_INVALID_SA_INDEX;
     const uint8_t *in_data = NULL;
-    uint8_t in_data_len = 0;
+    size_t in_data_len = 0;
     unsigned int l;
     int ret = 0;
 
-    if (1 > data_len)
+    if (data_len < 1)
     {
         nrc = UDS_NRC_IMLOIF;
     }
@@ -481,6 +481,140 @@ static uint8_t __uds_svc_tester_present(uds_context_t *ctx,
     return nrc;
 }
 
+static uint8_t __uds_svc_control_dtc_settings(uds_context_t *ctx,
+                                              const uint8_t *data, size_t data_len,
+                                              uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_PR;
+    uint8_t dtc_setting_type = 0xFF;
+    const uint8_t *extra_data = NULL;
+    size_t extra_data_len = 0;
+
+    if (data_len < 1)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        dtc_setting_type = __UDS_GET_SUBFUNCTION(data[0]);
+
+        if (data_len > 1)
+        {
+            extra_data = &data[1];
+            extra_data_len = (data_len - 1);
+        }
+
+        if ((UDS_LEV_DTCSTP_ON == dtc_setting_type) &&
+            (NULL != ctx->config->dtc_settings.cb_dtc_on))
+        {
+            if (__uds_session_check(ctx, &ctx->config->dtc_settings.sec_dtc_on) != 0)
+            {
+                nrc = UDS_NRC_SFNSIAS;
+            }
+            else if (__uds_security_check(ctx, &ctx->config->dtc_settings.sec_dtc_on) != 0)
+            {
+                nrc = UDS_NRC_SAD;
+            }
+            else if (ctx->config->dtc_settings.cb_dtc_on(ctx->priv, extra_data, extra_data_len) != 0)
+            {
+                uds_err(ctx, "cb_dtc_on failed\n");
+                nrc = UDS_NRC_CNC;
+            }
+            else
+            {
+                nrc = UDS_NRC_PR;
+            }
+        }
+        else if ((UDS_LEV_DTCSTP_OFF == dtc_setting_type) &&
+                 (NULL != ctx->config->dtc_settings.cb_dtc_off))
+        {
+            if (__uds_session_check(ctx, &ctx->config->dtc_settings.sec_dtc_off) != 0)
+            {
+                nrc = UDS_NRC_SFNSIAS;
+            }
+            else if (__uds_security_check(ctx, &ctx->config->dtc_settings.sec_dtc_off) != 0)
+            {
+                nrc = UDS_NRC_SAD;
+            }
+            else if (ctx->config->dtc_settings.cb_dtc_off(ctx->priv, extra_data, extra_data_len) != 0)
+            {
+                uds_err(ctx, "cb_dtc_off failed\n");
+                nrc = UDS_NRC_CNC;
+            }
+            else
+            {
+                nrc = UDS_NRC_PR;
+            }
+        }
+        else if ((dtc_setting_type >= UDS_LEV_DTCSTP_VMS_MIN) &&
+                 (dtc_setting_type <= UDS_LEV_DTCSTP_VMS_MAX) &&
+                 (NULL != ctx->config->dtc_settings.cb_dtc_settings_vms))
+        {
+            if (__uds_session_check(ctx, &ctx->config->dtc_settings.sec_dtc_settings_vms) != 0)
+            {
+                nrc = UDS_NRC_SFNSIAS;
+            }
+            else if (__uds_security_check(ctx, &ctx->config->dtc_settings.sec_dtc_settings_vms) != 0)
+            {
+                nrc = UDS_NRC_SAD;
+            }
+            else if (ctx->config->dtc_settings.cb_dtc_settings_vms(ctx->priv, dtc_setting_type,
+                                                                   extra_data, extra_data_len) != 0)
+            {
+                uds_err(ctx, "cb_dtc_settings_vms(0x%02X) failed\n", dtc_setting_type);
+                nrc = UDS_NRC_CNC;
+            }
+            else
+            {
+                nrc = UDS_NRC_PR;
+            }
+        }
+        else if ((dtc_setting_type >= UDS_LEV_DTCSTP_SSS_MIN) &&
+                 (dtc_setting_type <= UDS_LEV_DTCSTP_SSS_MAX) &&
+                 (NULL != ctx->config->dtc_settings.cb_dtc_settings_sss))
+        {
+            if (__uds_session_check(ctx, &ctx->config->dtc_settings.sec_dtc_settings_sss) != 0)
+            {
+                nrc = UDS_NRC_SFNSIAS;
+            }
+            else if (__uds_security_check(ctx, &ctx->config->dtc_settings.sec_dtc_settings_sss) != 0)
+            {
+                nrc = UDS_NRC_SAD;
+            }
+            else if (ctx->config->dtc_settings.cb_dtc_settings_sss(ctx->priv, dtc_setting_type,
+                                                                   extra_data, extra_data_len) != 0)
+            {
+                uds_err(ctx, "cb_dtc_settings_sss(0x%02X) failed\n", dtc_setting_type);
+                nrc = UDS_NRC_CNC;
+            }
+            else
+            {
+                nrc = UDS_NRC_PR;
+            }
+        }
+        else
+        {
+            nrc = UDS_NRC_SFNS;
+        }
+    }
+
+    if (nrc == UDS_NRC_PR)
+    {
+        if (__UDS_SUPPRESS_PR(data[0]))
+        {
+            nrc = UDS_SPRMINB;
+        }
+        else
+        {
+            res_data[0] = dtc_setting_type;
+            *res_data_len = 1;
+        }
+    }
+
+    return nrc;
+}
+
+
 static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
                               const uint8_t *data, size_t data_len,
                               const uds_address_e addr_type)
@@ -569,6 +703,8 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
         break;
 
     case UDS_SVC_CDTCS:
+        nrc = __uds_svc_control_dtc_settings(ctx, data, data_len,
+                                             res_data, &res_data_len);
         break;
 
     case UDS_SVC_ROE:
