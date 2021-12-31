@@ -19,15 +19,15 @@ typedef struct __uds_session_cfg
     uint64_t sa_type_mask;
 } uds_session_cfg_t;
 
-typedef int (*uds_request_seed_cb_t)(void *priv, const uint8_t sa_level,
+typedef int (*uds_request_seed_cb_t)(void *priv, const uint8_t sa_index,
                                      const uint8_t in_data[], size_t in_data_len,
                                      uint8_t out_seed[], size_t *out_seed_len);
-typedef int (*uds_validate_key_cb_t)(void *priv, const uint8_t sa_level,
+typedef int (*uds_validate_key_cb_t)(void *priv, const uint8_t sa_index,
                                      const uint8_t key[], size_t key_len);
 
 typedef struct __uds_sa_cfg
 {
-    uint8_t sa_level;
+    uint8_t sa_index;
     uds_request_seed_cb_t request_seed;
     uds_validate_key_cb_t validate_key;
 } uds_sa_cfg_t;
@@ -91,7 +91,7 @@ typedef struct __uds_context
     unsigned int loglevel;
     const uds_session_cfg_t *current_session;
     uint8_t current_sa_seed;
-    const uds_sa_cfg_t *current_sa_level;
+    const uds_sa_cfg_t *current_sa;
 
     uint8_t response_buffer[4096];
 } uds_context_t;

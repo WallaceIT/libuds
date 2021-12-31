@@ -29,8 +29,10 @@
 
 #define MS_TO_US(ms) (ms*1000UL)
 
-static int fd_can_tp_phys = -1;
-static int fd_can_tp_func = -1;
+struct private_data {
+    int fd_can_tp_phys;
+    int fd_can_tp_func;
+};
 
 static const uint32_t can_tp_phys_rx_id = (0x18DA0102 & CAN_EFF_MASK);
 static const uint32_t can_tp_phys_tx_id = (0x18DA0201 & CAN_EFF_MASK);
@@ -131,14 +133,6 @@ static int can_tp_send(int fd, void *buffer, size_t *size)
     }
 
     return (ret < 0) ? -1 : 0;
-}
-
-static int uds_send_callback(const uint8_t data[], size_t len)
-{
-    size_t int_len = len;
-    int ret;
-    ret = can_tp_send(fd_can_tp_phys, (void *)data, &int_len);
-    return ret;
 }
 
 static int timer_init(long microseconds)
@@ -296,9 +290,20 @@ static const uds_session_cfg_t uds_sessions[] =
     },
 };
 
-int sa_request_seed(const uint8_t sa_level,
-                    const uint8_t in_data[], size_t in_data_len,
-                    uint8_t out_seed[], size_t *out_seed_len)
+static int uds_send_callback(void *priv, const uint8_t data[], size_t len)
+{
+    struct private_data * private_data = (struct private_data *)priv;
+    size_t int_len = len;
+    int ret;
+
+    ret = can_tp_send(private_data->fd_can_tp_phys, (void *)data, &int_len);
+
+    return ret;
+}
+
+static int sa_request_seed(void *priv, const uint8_t sa_index,
+                           const uint8_t in_data[], size_t in_data_len,
+                           uint8_t out_seed[], size_t *out_seed_len)
 {
     out_seed[0] = 0xAA;
     out_seed[1] = 0xDE;
@@ -306,7 +311,8 @@ int sa_request_seed(const uint8_t sa_level,
     return 0;
 }
 
-int sa_validate_key(const uint8_t sa_level, const uint8_t key[], size_t key_len)
+static int sa_validate_key(void *priv, const uint8_t sa_index,
+                           const uint8_t key[], size_t key_len)
 {
     return 0;
 }
@@ -314,7 +320,7 @@ int sa_validate_key(const uint8_t sa_level, const uint8_t key[], size_t key_len)
 static const uds_sa_cfg_t sas[] =
 {
     {
-        .sa_level = 1,
+        .sa_index = 0,
         .request_seed = sa_request_seed,
         .validate_key = sa_validate_key,
     }
@@ -342,9 +348,10 @@ int main(int argc, char *argv[])
 
     uds_context_t uds_ctx;
 
-
     int fd_timer_uds = -1;
     int fd_signals = -1;
+
+    struct private_data private_data;
 
     struct epoll_event events[6];
     int epollfd = -1;
@@ -378,7 +385,7 @@ int main(int argc, char *argv[])
     }
 
     // Intialize UDS library
-    uds_init(&uds_ctx, &uds_config);
+    uds_init(&uds_ctx, &uds_config, &private_data);
 
     // Create poller
     epollfd = epoll_create1(0);
@@ -423,8 +430,8 @@ int main(int argc, char *argv[])
     }
 
     // Init ISOTP functional socket and add it to poller
-    fd_can_tp_func = can_tp_init(can_iface, can_tp_func_rx_id, 0, true);
-    if (fd_can_tp_func < 0)
+    private_data.fd_can_tp_func = can_tp_init(can_iface, can_tp_func_rx_id, 0, true);
+    if (private_data.fd_can_tp_func < 0)
     {
         fprintf(stderr, "Failed to init CAN-ISOTP FUNC\n");
     }
@@ -432,16 +439,16 @@ int main(int argc, char *argv[])
     {
         struct epoll_event ev;
         ev.events = EPOLLIN;
-        ev.data.fd = fd_can_tp_func;
-        if (epoll_ctl(epollfd, EPOLL_CTL_ADD, fd_can_tp_func, &ev) == -1)
+        ev.data.fd = private_data.fd_can_tp_func;
+        if (epoll_ctl(epollfd, EPOLL_CTL_ADD, private_data.fd_can_tp_func, &ev) == -1)
         {
             fprintf(stderr, "Cannot add CAN-ISOTP FUNC to epoll: %s\n", strerror(errno));
         }
     }
 
     // Init ISOTP physical socket and add it to poller
-    fd_can_tp_phys = can_tp_init(can_iface, can_tp_phys_rx_id, can_tp_phys_tx_id, true);
-    if (fd_can_tp_phys < 0)
+    private_data.fd_can_tp_phys = can_tp_init(can_iface, can_tp_phys_rx_id, can_tp_phys_tx_id, true);
+    if (private_data.fd_can_tp_phys < 0)
     {
         fprintf(stderr, "Failed to init CAN-ISOTP PHYS\n");
     }
@@ -449,8 +456,8 @@ int main(int argc, char *argv[])
     {
         struct epoll_event ev;
         ev.events = EPOLLIN;
-        ev.data.fd = fd_can_tp_phys;
-        if (epoll_ctl(epollfd, EPOLL_CTL_ADD, fd_can_tp_phys, &ev) == -1)
+        ev.data.fd = private_data.fd_can_tp_phys;
+        if (epoll_ctl(epollfd, EPOLL_CTL_ADD, private_data.fd_can_tp_phys, &ev) == -1)
         {
             fprintf(stderr, "Cannot add CAN-ISOTP PHYS to epoll: %s\n", strerror(errno));
         }
@@ -503,10 +510,10 @@ int main(int argc, char *argv[])
                 }
             }
             // Ready to receive CAN frames
-            else if (triggered_fd == fd_can_tp_phys)
+            else if (triggered_fd == private_data.fd_can_tp_phys)
             {
                 size_t size = sizeof(can_tp_phys_buf);
-                if (can_tp_receive(fd_can_tp_phys, can_tp_phys_buf, &size) == 0)
+                if (can_tp_receive(private_data.fd_can_tp_phys, can_tp_phys_buf, &size) == 0)
                 {
                     if (uds_receive(&uds_ctx, UDS_ADDRESS_PHYSICAL, can_tp_phys_buf, size) != 0)
                     {
@@ -518,10 +525,10 @@ int main(int argc, char *argv[])
                     fprintf(stderr, "Failed to receive from PHYS CAN-ISOTP: %s\n", strerror(errno));
                 }
             }
-            else if (triggered_fd == fd_can_tp_func)
+            else if (triggered_fd == private_data.fd_can_tp_func)
             {
                 size_t size = sizeof(can_tp_func_buf);
-                if (can_tp_receive(fd_can_tp_func, can_tp_func_buf, &size) == 0)
+                if (can_tp_receive(private_data.fd_can_tp_func, can_tp_func_buf, &size) == 0)
                 {
                     if (uds_receive(&uds_ctx, UDS_ADDRESS_FUNCTIONAL, can_tp_func_buf, size) != 0)
                     {

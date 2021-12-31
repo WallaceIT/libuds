@@ -12,19 +12,24 @@
 #define __UDS_GET_SUBFUNCTION(x) (x&(~UDS_SPRMINB))
 #define __UDS_SUPPRESS_PR(x) (UDS_SPRMINB==(x&UDS_SPRMINB))
 
-static inline uint8_t __uds_sat_to_sa_level(const uint8_t sat)
+#define __UDS_INVALID_SA_INDEX 0xFF
+
+static inline uint8_t __uds_sat_to_sa_index(const uint8_t sat)
 {
-    return ((sat + 1) / 2);
+    return ((sat - 1) / 2);
 }
 
 static inline int __uds_session_check(uds_context_t *ctx, const uds_security_cfg_t* cfg)
 {
     int ret = -1;
 
-    if (((ctx->current_session->session_type < 64) &&
-         (((1UL << ctx->current_session->session_type) & cfg->session_mask[0]) != 0)) ||
-        ((ctx->current_session->session_type >= 64) &&
-         (((1UL << ctx->current_session->session_type) & cfg->session_mask[1]) != 0)))
+    if ((ctx->current_session->session_type < 64) &&
+        ((1UL << ctx->current_session->session_type) & cfg->session_mask[0]) != 0)
+    {
+        ret = 0;
+    }
+    else if ((ctx->current_session->session_type >= 64) &&
+             ((1UL << ctx->current_session->session_type) & cfg->session_mask[1]) != 0)
     {
         ret = 0;
     }
@@ -36,8 +41,11 @@ static inline int __uds_security_check(uds_context_t *ctx, const uds_security_cf
 {
     int ret = -1;
 
-    if ((NULL != cfg) &&
-        ((UDS_CFG_SA_TYPE(ctx->current_sa_level->sa_level) & cfg->sa_type_mask) != 0))
+    if (cfg->sa_type_mask == 0)
+    {
+        ret = 0;
+    }
+    else if ((UDS_CFG_SA_TYPE(ctx->current_sa->sa_index) & cfg->sa_type_mask) != 0)
     {
         ret = 0;
     }
@@ -322,7 +330,7 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
 {
     uint8_t nrc = UDS_NRC_SFNS;
     uint8_t sr = 0x00;
-    uint8_t sa_level = 0x00;
+    uint8_t sa_index = __UDS_INVALID_SA_INDEX;
     const uint8_t *in_data = NULL;
     uint8_t in_data_len = 0;
     unsigned int l;
@@ -335,7 +343,7 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
     else
     {
         sr = __UDS_GET_SUBFUNCTION(data[0]);
-        sa_level = __uds_sat_to_sa_level(sr);
+        sa_index = __uds_sat_to_sa_index(sr);
 
         in_data_len = (data_len - 1);
         if (in_data_len > 0)
@@ -347,8 +355,7 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
         {
             nrc = UDS_NRC_SFNS;
         }
-        else if ((NULL == ctx->current_session) ||
-                 (0 == (ctx->current_session->sa_type_mask & UDS_CFG_SA_TYPE(sa_level))))
+        else if (0 == (ctx->current_session->sa_type_mask & UDS_CFG_SA_TYPE(sa_index)))
         {
             nrc = UDS_NRC_CNC;
         }
@@ -358,27 +365,27 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
         }
         else if ((sr % 2) != 0)
         {
-            uds_debug(ctx, "request_seed for SA 0x%02X\n", sa_level);
+            uds_debug(ctx, "request_seed for SA 0x%02X\n", sa_index);
 
             for (l = 0; l < ctx->config->num_sa_config; l++)
             {
-                if (ctx->config->sa_config[l].sa_level == sa_level)
+                if (ctx->config->sa_config[l].sa_index == sa_index)
                 {
                     if (NULL != ctx->config->sa_config[l].request_seed)
                     {
-                        ret = ctx->config->sa_config[l].request_seed(ctx->priv, sa_level,
+                        ret = ctx->config->sa_config[l].request_seed(ctx->priv, sa_index,
                                                                      in_data, in_data_len,
                                                                      &res_data[1], res_data_len);
                         if (ret < 0)
                         {
-                            uds_info(ctx, "request_seed for SA 0x%02X failed\n", sa_level);
+                            uds_info(ctx, "request_seed for SA 0x%02X failed\n", sa_index);
                             nrc = UDS_NRC_ROOR;
                         }
                         else
                         {
                             // If security level is already unlocked, send an all-zero seed
-                            if ((NULL != ctx->current_sa_level) &&
-                                (ctx->current_sa_level->sa_level == sa_level))
+                            if ((NULL != ctx->current_sa) &&
+                                (ctx->current_sa->sa_index == sa_index))
                             {
                                 for (l = 0; l < *res_data_len; l++)
                                 {
@@ -387,7 +394,7 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
                             }
                             else
                             {
-                                ctx->current_sa_seed = sa_level;
+                                ctx->current_sa_seed = sa_index;
                             }
                             res_data[0] = sr;
                             *res_data_len = (*res_data_len + 1);
@@ -396,46 +403,46 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
                     }
                     else
                     {
-                        uds_err(ctx, "request_seed callback not defined for SA 0x%02X\n", sa_level);
+                        uds_err(ctx, "request_seed callback not defined for SA 0x%02X\n", sa_index);
                         nrc = UDS_NRC_SFNS;
                     }
                     break;
                 }
             }
         }
-        else if (ctx->current_sa_seed != sa_level)
+        else if (ctx->current_sa_seed != sa_index)
         {
             nrc == UDS_NRC_RSE;
         }
         else
         {
-            uds_debug(ctx, "validate_key for SA 0x%02X\n", sa_level);
+            uds_debug(ctx, "validate_key for SA 0x%02X\n", sa_index);
 
             for (l = 0; l < ctx->config->num_sa_config; l++)
             {
-                if (ctx->config->sa_config[l].sa_level == sa_level)
+                if (ctx->config->sa_config[l].sa_index == sa_index)
                 {
                     if (NULL != ctx->config->sa_config[l].validate_key)
                     {
-                        ret = ctx->config->sa_config[l].validate_key(ctx->priv, sa_level,
+                        ret = ctx->config->sa_config[l].validate_key(ctx->priv, sa_index,
                                                                      in_data, in_data_len);
                         if (ret < 0)
                         {
-                            uds_info(ctx, "validate_key for SA 0x%02X failed\n", sa_level);
+                            uds_info(ctx, "validate_key for SA 0x%02X failed\n", sa_index);
                             nrc = UDS_NRC_IK;
                         }
                         else
                         {
                             res_data[0] = sr;
                             *res_data_len = 1;
-                            ctx->current_sa_level = &ctx->config->sa_config[l];
-                            ctx->current_sa_seed = 0x00;
+                            ctx->current_sa = &ctx->config->sa_config[l];
+                            ctx->current_sa_seed = __UDS_INVALID_SA_INDEX;
                             nrc = UDS_NRC_PR;
                         }
                     }
                     else
                     {
-                        uds_err(ctx, "validate_key callback not defined for SA 0x%02X\n", sa_level);
+                        uds_err(ctx, "validate_key callback not defined for SA 0x%02X\n", sa_index);
                     }
                     break;
                 }
@@ -608,37 +615,18 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
     return ret;
 }
 
-int uds_init(uds_context_t *ctx, const uds_config_t *config, void *priv)
+static int __uds_init(uds_context_t *ctx, const uds_config_t *config, void *priv, unsigned int loglevel)
 {
-    char *env_tmp = NULL;
-    int ret = 0;
     unsigned int l;
-
-    if (NULL == ctx)
-    {
-        return -1;
-    }
-
-    memset(ctx, 0, sizeof(uds_context_t));
-
-    // Parse encironment options
-    env_tmp = getenv("LIBUDS_DEBUG");
-    if ((NULL != env_tmp) && (env_tmp[0] >= '0') && (env_tmp[0] <= '9'))
-    {
-        ctx->loglevel = env_tmp[0] - '0';
-        uds_info(ctx, "loglevel: %u\n", ctx->loglevel);
-    }
+    int ret = 0;
 
     // Init context
-    if (NULL != config)
-    {
-        ctx->config = config;
-    }
-    else
-    {
-        uds_err(ctx, "config shall be supplied to init function\n");
-        ret = -1;
-    }
+    memset(ctx, 0, sizeof(uds_context_t));
+
+    ctx->config = config;
+    ctx->priv = priv;
+    ctx->loglevel = loglevel;
+    ctx->current_sa_seed = __UDS_INVALID_SA_INDEX;
 
     // Check and validate config
     if (0 == ctx->config->p2)
@@ -651,12 +639,35 @@ int uds_init(uds_context_t *ctx, const uds_config_t *config, void *priv)
         uds_warning(ctx, "P2max time is set to 0ms\n");
     }
 
-    for (l = 0; l < ctx->config->num_sa_config; l++)
+    return ret;
+}
+
+int uds_init(uds_context_t *ctx, const uds_config_t *config, void *priv)
+{
+    char *env_tmp = NULL;
+    unsigned int loglevel = 4;
+    int ret = -1;
+
+    // Parse environment options
+    env_tmp = getenv("LIBUDS_DEBUG");
+    if ((NULL != env_tmp) && (env_tmp[0] >= '0') && (env_tmp[0] <= '9'))
     {
-        if (ctx->config->sa_config[l].sa_level == 0)
-        {
-            uds_warning(ctx, "SA config with sa_level equal to 0, will be ignored\n");
-        }
+        loglevel = env_tmp[0] - '0';
+    }
+
+    if (NULL == ctx)
+    {
+        uds_err(ctx, "context shall be supplied to init function\n");
+        ret = -1;
+    }
+    else if (NULL == config)
+    {
+        uds_err(ctx, "config shall be supplied to init function\n");
+        ret = -1;
+    }
+    else
+    {
+        ret = __uds_init(ctx, config, priv, loglevel);
     }
 
     return ret;
