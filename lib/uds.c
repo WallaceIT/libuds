@@ -12,12 +12,45 @@
 #define __UDS_GET_SUBFUNCTION(x) (x&(~UDS_SPRMINB))
 #define __UDS_SUPPRESS_PR(x) (UDS_SPRMINB==(x&UDS_SPRMINB))
 
+static inline uint8_t __uds_sat_to_sa_level(const uint8_t sat)
+{
+    return ((sat + 1) / 2);
+}
+
+static inline int __uds_session_check(uds_context_t *ctx, const uds_security_cfg_t* cfg)
+{
+    int ret = -1;
+
+    if (((ctx->current_session->session_type < 64) &&
+         (((1UL << ctx->current_session->session_type) & cfg->session_mask[0]) != 0)) ||
+        ((ctx->current_session->session_type >= 64) &&
+         (((1UL << ctx->current_session->session_type) & cfg->session_mask[1]) != 0)))
+    {
+        ret = 0;
+    }
+
+    return ret;
+}
+
+static inline int __uds_security_check(uds_context_t *ctx, const uds_security_cfg_t* cfg)
+{
+    int ret = -1;
+
+    if ((NULL != cfg) &&
+        ((UDS_CFG_SA_TYPE(ctx->current_sa_level->sa_level) & cfg->sa_type_mask) != 0))
+    {
+        ret = 0;
+    }
+
+    return ret;
+}
+
 static int __uds_send(uds_context_t *ctx, const uint8_t *data, size_t len)
 {
     static int no_cb_err_once = 0;
     int ret = 0;
 
-    if (NULL == ctx->config.cb_send)
+    if (NULL == ctx->config->cb_send)
     {
         if (no_cb_err_once == 0)
         {
@@ -28,7 +61,7 @@ static int __uds_send(uds_context_t *ctx, const uint8_t *data, size_t len)
     }
     else if ((NULL != data) && (len > 0))
     {
-        ret = ctx->config.cb_send(data, len);
+        ret = ctx->config->cb_send(ctx->priv, data, len);
         if (ret != 0)
         {
             uds_err(ctx, "send callback failed\n");
@@ -53,17 +86,17 @@ static uint8_t __uds_svc_session_control(uds_context_t *ctx,
     else
     {
         requested_session = __UDS_GET_SUBFUNCTION(data[0]);
-        for (s = 0; s < ctx->config.num_session_config; s++)
+        for (s = 0; s < ctx->config->num_session_config; s++)
         {
-            if (ctx->config.session_config[s].session_type == requested_session)
+            if (ctx->config->session_config[s].session_type == requested_session)
             {
                 uds_info(ctx, "entering session 0x%02X\n", requested_session);
-                ctx->current_session = &ctx->config.session_config[s];
+                ctx->current_session = &ctx->config->session_config[s];
                 break;
             }
         }
 
-        if (ctx->config.num_session_config == s)
+        if (ctx->config->num_session_config == s)
         {
             uds_info(ctx, "requested session 0x%02X not available\n", requested_session);
             nrc = UDS_NRC_SFNS;
@@ -76,10 +109,10 @@ static uint8_t __uds_svc_session_control(uds_context_t *ctx,
         {
             nrc = UDS_NRC_PR;
             res_data[0] = requested_session;
-            res_data[1] = ((ctx->config.p2 >> 8) & 0xFF);
-            res_data[2] = ((ctx->config.p2 >> 0) & 0xFF);
-            res_data[3] = ((ctx->config.p2max >> 8) & 0xFF);
-            res_data[4] = ((ctx->config.p2max >> 0) & 0xFF);
+            res_data[1] = ((ctx->config->p2 >> 8) & 0xFF);
+            res_data[2] = ((ctx->config->p2 >> 0) & 0xFF);
+            res_data[3] = ((ctx->config->p2max >> 8) & 0xFF);
+            res_data[4] = ((ctx->config->p2max >> 0) & 0xFF);
             *res_data_len = 5;
         }
     }
@@ -87,9 +120,194 @@ static uint8_t __uds_svc_session_control(uds_context_t *ctx,
     return nrc;
 }
 
-static inline uint8_t __uds_sat_to_sa_level(const uint8_t sat)
+static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
+                                   const uint8_t *data, size_t data_len,
+                                   uint8_t *res_data, size_t *res_data_len)
 {
-    return ((sat + 1) / 2);
+    uint8_t nrc = UDS_NRC_SFNS;
+    uint8_t reset_type = 0;
+
+    if (1 != data_len)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        reset_type = __UDS_GET_SUBFUNCTION(data[0]);
+
+        if ((UDS_LEV_RT_HR == reset_type) && 
+            (NULL != ctx->config->ecureset.cb_reset_hard))
+        {
+            if (__uds_session_check(ctx, &ctx->config->ecureset.sec_reset_hard) != 0)
+            {
+                nrc = UDS_NRC_SFNSIAS;
+            }
+            else if (__uds_security_check(ctx, &ctx->config->ecureset.sec_reset_hard) != 0)
+            {
+                nrc = UDS_NRC_SAD;
+            }
+            else if (ctx->config->ecureset.cb_reset_hard(ctx->priv) != 0)
+            {
+                uds_err(ctx, "cb_reset_hard failed\n");
+                nrc = UDS_NRC_CNC;
+            }
+            else
+            {
+                nrc = UDS_NRC_PR;
+            }
+        }
+        else if ((UDS_LEV_RT_KOFFONR == reset_type) && 
+                 (NULL != ctx->config->ecureset.cb_reset_keyoffon))
+        {
+            if (__uds_session_check(ctx, &ctx->config->ecureset.sec_reset_keyoffon) != 0)
+            {
+                nrc = UDS_NRC_SFNSIAS;
+            }
+            else if (__uds_security_check(ctx, &ctx->config->ecureset.sec_reset_keyoffon) != 0)
+            {
+                nrc = UDS_NRC_SAD;
+            }
+            else if (ctx->config->ecureset.cb_reset_keyoffon(ctx->priv) != 0)
+            {
+                uds_err(ctx, "cb_reset_keyoffon failed\n");
+                nrc = UDS_NRC_CNC;
+            }
+            else
+            {
+                nrc = UDS_NRC_PR;
+            }
+        }
+        else if ((UDS_LEV_RT_SR == reset_type) && 
+                 (NULL != ctx->config->ecureset.cb_reset_soft))
+        {
+            if (__uds_session_check(ctx, &ctx->config->ecureset.sec_reset_soft) != 0)
+            {
+                nrc = UDS_NRC_SFNSIAS;
+            }
+            else if (__uds_security_check(ctx, &ctx->config->ecureset.sec_reset_soft) != 0)
+            {
+                nrc = UDS_NRC_SAD;
+            }
+            else if (ctx->config->ecureset.cb_reset_soft(ctx->priv) != 0)
+            {
+                uds_err(ctx, "cb_reset_soft failed\n");
+                nrc = UDS_NRC_CNC;
+            }
+            else
+            {
+                nrc = UDS_NRC_PR;
+            }
+        }
+        else if ((UDS_LEV_RT_ERPSD == reset_type) && 
+                 (NULL != ctx->config->ecureset.cb_enable_rps))
+        {
+            if (data_len < 2)
+            {
+                nrc = UDS_NRC_IMLOIF;
+            }
+            else if (__uds_session_check(ctx, &ctx->config->ecureset.sec_rps) != 0)
+            {
+                nrc = UDS_NRC_SFNSIAS;
+            }
+            else if (__uds_security_check(ctx, &ctx->config->ecureset.sec_rps) != 0)
+            {
+                nrc = UDS_NRC_SAD;
+            }
+            else if (ctx->config->ecureset.cb_enable_rps(ctx->priv, data[1]) != 0)
+            {
+                uds_err(ctx, "cb_enable_rps failed\n");
+                nrc = UDS_NRC_CNC;
+            }
+            else
+            {
+                nrc = UDS_NRC_PR;
+            }
+        }
+        else if ((UDS_LEV_RT_ERPSD == reset_type) && 
+                 (NULL != ctx->config->ecureset.cb_disable_rps))
+        {
+            if (__uds_session_check(ctx, &ctx->config->ecureset.sec_rps) != 0)
+            {
+                nrc = UDS_NRC_SFNSIAS;
+            }
+            else if (__uds_security_check(ctx, &ctx->config->ecureset.sec_rps) != 0)
+            {
+                nrc = UDS_NRC_SAD;
+            }
+            else if (ctx->config->ecureset.cb_disable_rps(ctx->priv) != 0)
+            {
+                uds_err(ctx, "cb_enable_rps failed\n");
+                nrc = UDS_NRC_CNC;
+            }
+            else
+            {
+                nrc = UDS_NRC_PR;
+            }
+        }
+        else if ((reset_type >= UDS_LEV_RT_VMS_MIN) &&
+                 (reset_type <= UDS_LEV_RT_VMS_MAX) &&
+                 (NULL != ctx->config->ecureset.cb_reset_vms))
+        {
+            if (__uds_session_check(ctx, &ctx->config->ecureset.sec_reset_vms) != 0)
+            {
+                nrc = UDS_NRC_SFNSIAS;
+            }
+            else if (__uds_security_check(ctx, &ctx->config->ecureset.sec_reset_vms) != 0)
+            {
+                nrc = UDS_NRC_SAD;
+            }
+            else if (ctx->config->ecureset.cb_reset_vms(ctx->priv, reset_type) != 0)
+            {
+                uds_err(ctx, "cb_reset_vms(0x%02X) failed\n", reset_type);
+                nrc = UDS_NRC_CNC;
+            }
+            else
+            {
+                nrc = UDS_NRC_PR;
+            }
+        }
+        else if ((reset_type >= UDS_LEV_RT_SSS_MIN) &&
+                 (reset_type <= UDS_LEV_RT_SSS_MAX) &&
+                 (NULL != ctx->config->ecureset.cb_reset_sss))
+        {
+            if (__uds_session_check(ctx, &ctx->config->ecureset.sec_reset_sss) != 0)
+            {
+                nrc = UDS_NRC_SFNSIAS;
+            }
+            else if (__uds_security_check(ctx, &ctx->config->ecureset.sec_reset_sss) != 0)
+            {
+                nrc = UDS_NRC_SAD;
+            }
+            else if (ctx->config->ecureset.cb_reset_sss(ctx->priv, reset_type) != 0)
+            {
+                uds_err(ctx, "cb_reset_sss(0x%02X) failed\n", reset_type);
+                nrc = UDS_NRC_CNC;
+            }
+            else
+            {
+                nrc = UDS_NRC_PR;
+            }
+        }
+        else
+        {
+            nrc = UDS_NRC_SFNS;
+        }
+    }
+
+    if (nrc == UDS_NRC_PR)
+    {
+        if (__UDS_SUPPRESS_PR(data[0]))
+        {
+            nrc = UDS_SPRMINB;
+        }
+        else
+        {
+            res_data[0] = reset_type;
+            *res_data_len = 1;
+        }
+    }
+
+    return nrc;
 }
 
 static int __uds_svc_secure_access_delay_timer_active(uds_context_t *ctx)
@@ -142,15 +360,15 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
         {
             uds_debug(ctx, "request_seed for SA 0x%02X\n", sa_level);
 
-            for (l = 0; l < ctx->config.num_sa_config; l++)
+            for (l = 0; l < ctx->config->num_sa_config; l++)
             {
-                if (ctx->config.sa_config[l].sa_level == sa_level)
+                if (ctx->config->sa_config[l].sa_level == sa_level)
                 {
-                    if (NULL != ctx->config.sa_config[l].request_seed)
+                    if (NULL != ctx->config->sa_config[l].request_seed)
                     {
-                        ret = ctx->config.sa_config[l].request_seed(sa_level,
-                                                                    in_data, in_data_len,
-                                                                    &res_data[1], res_data_len);
+                        ret = ctx->config->sa_config[l].request_seed(ctx->priv, sa_level,
+                                                                     in_data, in_data_len,
+                                                                     &res_data[1], res_data_len);
                         if (ret < 0)
                         {
                             uds_info(ctx, "request_seed for SA 0x%02X failed\n", sa_level);
@@ -193,13 +411,14 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
         {
             uds_debug(ctx, "validate_key for SA 0x%02X\n", sa_level);
 
-            for (l = 0; l < ctx->config.num_sa_config; l++)
+            for (l = 0; l < ctx->config->num_sa_config; l++)
             {
-                if (ctx->config.sa_config[l].sa_level == sa_level)
+                if (ctx->config->sa_config[l].sa_level == sa_level)
                 {
-                    if (NULL != ctx->config.sa_config[l].validate_key)
+                    if (NULL != ctx->config->sa_config[l].validate_key)
                     {
-                        ret = ctx->config.sa_config[l].validate_key(sa_level, in_data, in_data_len);
+                        ret = ctx->config->sa_config[l].validate_key(ctx->priv, sa_level,
+                                                                     in_data, in_data_len);
                         if (ret < 0)
                         {
                             uds_info(ctx, "validate_key for SA 0x%02X failed\n", sa_level);
@@ -209,7 +428,7 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
                         {
                             res_data[0] = sr;
                             *res_data_len = 1;
-                            ctx->current_sa_level = &ctx->config.sa_config[l];
+                            ctx->current_sa_level = &ctx->config->sa_config[l];
                             ctx->current_sa_seed = 0x00;
                             nrc = UDS_NRC_PR;
                         }
@@ -260,7 +479,7 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
                               const uds_address_e addr_type)
 {
     uint8_t *res_data = &ctx->response_buffer[1];
-    size_t res_data_len = 0;
+    size_t res_data_len = sizeof(ctx->response_buffer);
     uint8_t nrc = UDS_NRC_SNS;
     int ret = 0;
 
@@ -274,6 +493,8 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
         break;
 
     case UDS_SVC_ER:
+        nrc = __uds_svc_ecu_reset(ctx, data, data_len,
+                                  res_data, &res_data_len);
         break;
 
     case UDS_SVC_CDTCI:
@@ -387,7 +608,7 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
     return ret;
 }
 
-int uds_init(uds_context_t *ctx, const uds_config_t *config)
+int uds_init(uds_context_t *ctx, const uds_config_t *config, void *priv)
 {
     char *env_tmp = NULL;
     int ret = 0;
@@ -411,7 +632,7 @@ int uds_init(uds_context_t *ctx, const uds_config_t *config)
     // Init context
     if (NULL != config)
     {
-        memcpy(&ctx->config, config, sizeof(uds_config_t));
+        ctx->config = config;
     }
     else
     {
@@ -420,21 +641,21 @@ int uds_init(uds_context_t *ctx, const uds_config_t *config)
     }
 
     // Check and validate config
-    if (0 == ctx->config.p2)
+    if (0 == ctx->config->p2)
     {
         uds_warning(ctx, "P2 time is set to 0ms\n");
     }
 
-    if (0 == ctx->config.p2max)
+    if (0 == ctx->config->p2max)
     {
         uds_warning(ctx, "P2max time is set to 0ms\n");
     }
 
-    for (l = 0; l < ctx->config.num_sa_config; l++)
+    for (l = 0; l < ctx->config->num_sa_config; l++)
     {
-        if (ctx->config.sa_config[l].sa_level == 0)
+        if (ctx->config->sa_config[l].sa_level == 0)
         {
-            uds_warning(ctx, "specified SA config with sa_level equal to 0, it will be ignored\n");
+            uds_warning(ctx, "SA config with sa_level equal to 0, will be ignored\n");
         }
     }
 

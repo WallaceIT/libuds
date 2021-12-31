@@ -90,6 +90,10 @@
 #define UDS_LEV_RT_SR           0x03 // Soft Reset
 #define UDS_LEV_RT_ERPSD        0x04 // Enable Rapid Power ShutDown
 #define UDS_LEV_RT_DRPSD        0x05 // Disable Rapid Power ShutDown
+#define UDS_LEV_RT_VMS_MIN      0x40 // Vehicle Manufacturer Specific
+#define UDS_LEV_RT_VMS_MAX      0x5F
+#define UDS_LEV_RT_SSS_MIN      0x60 // System Supplier Specific
+#define UDS_LEV_RT_SSS_MAX      0x7E
 
 // Security access types (sub-functions of UDS_SVC_SA)
 #define UDS_LEV_SA_RSD          0x01 // Request Seed
