@@ -32,6 +32,10 @@
 struct private_data {
     int fd_can_tp_phys;
     int fd_can_tp_func;
+
+    struct {
+        uint8_t vin[18];
+    } data;
 };
 
 static const uint32_t can_tp_phys_rx_id = (0x18DA0102 & CAN_EFF_MASK);
@@ -328,7 +332,47 @@ static const uds_sa_cfg_t sas[] =
 
 static int data_read(void *priv, uint16_t identifier, uint8_t *data, size_t *len)
 {
-    return 0;
+    struct private_data * private_data = (struct private_data *)priv;
+    int ret = -1;
+
+    switch (identifier)
+    {
+    case 0xF190:
+        if (*len >= 17)
+        {
+            memcpy(data, private_data->data.vin, 17);
+            ret = 0;
+        }
+        *len = 17;
+        break;
+
+    default:
+        break;
+    }
+
+    return ret;
+}
+
+static int data_write(void *priv, uint16_t identifier, const uint8_t *data, const size_t len)
+{
+    struct private_data * private_data = (struct private_data *)priv;
+    int ret = -1;
+
+    switch (identifier)
+    {
+    case 0xF190:
+        if (len == 17)
+        {
+            memcpy(private_data->data.vin, data, 17);
+            ret = 0;
+        }
+        break;
+
+    default:
+        break;
+    }
+
+    return ret;
 }
 
 static const uds_config_data_t data_items[] =
@@ -339,6 +383,10 @@ static const uds_config_data_t data_items[] =
         .sec_read.sa_type_mask = UDS_CFG_SA_TYPE_NONE,
         .sec_read.session_mask[0] = UDS_CFG_SESSION_MASK_ALL,
         .sec_read.session_mask[1] = UDS_CFG_SESSION_MASK_ALL,
+        .cb_write = data_write,
+        .sec_write.sa_type_mask = UDS_CFG_SA_TYPE(0),
+        .sec_write.session_mask[0] = UDS_CFG_SESSION_MASK(3),
+        .sec_write.session_mask[1] = UDS_CFG_SESSION_MASK_NONE,
     }
 };
 
@@ -371,7 +419,13 @@ int main(int argc, char *argv[])
     int fd_timer_uds = -1;
     int fd_signals = -1;
 
-    struct private_data private_data;
+    struct private_data private_data =
+    {
+        .data =
+        {
+            .vin = "0123456789ABCDEF_"
+        }
+    };
 
     struct epoll_event events[6];
     int epollfd = -1;

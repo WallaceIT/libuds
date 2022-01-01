@@ -8,8 +8,9 @@
 #define UDS_CFG_SA_TYPE_ALL         (0xFFFFFFFFFFFFFFFF)
 #define UDS_CFG_SA_TYPE(x)          (0x0000000000000001 << x)
 
-#define UDS_CFG_SESSION_MASK(x)     (0x0000000000000001 << x)
+#define UDS_CFG_SESSION_MASK_NONE   (0x0000000000000000)
 #define UDS_CFG_SESSION_MASK_ALL    (0xFFFFFFFFFFFFFFFF)
+#define UDS_CFG_SESSION_MASK(x)     (0x0000000000000001 << x)
 
 typedef struct __uds_security_cfg
 {

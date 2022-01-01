@@ -51,8 +51,8 @@ static inline int __uds_session_check(uds_context_t *ctx, const uds_security_cfg
 
     uds_debug(ctx, "session_check with active session = 0x%02X\n",
               ctx->current_session->session_type);
-    uds_debug(ctx, "sm[0] = 0x%016X\n", cfg->session_mask[0]);
-    uds_debug(ctx, "sm[1] = 0x%016X\n", cfg->session_mask[1]);
+    uds_debug(ctx, "sm[0] = 0x%016lX\n", cfg->session_mask[0]);
+    uds_debug(ctx, "sm[1] = 0x%016lX\n", cfg->session_mask[1]);
 
     if ((ctx->current_session->session_type < 64) &&
         ((1UL << ctx->current_session->session_type) & cfg->session_mask[0]) != 0)
@@ -72,11 +72,16 @@ static inline int __uds_security_check(uds_context_t *ctx, const uds_security_cf
 {
     int ret = -1;
 
+    uds_debug(ctx, "security_check with current sa_index = %d\n",
+              (NULL != ctx->current_sa) ? ctx->current_sa->sa_index : -1);
+    uds_debug(ctx, "sa_tm = 0x%016lX\n", cfg->sa_type_mask);
+
     if (cfg->sa_type_mask == 0)
     {
         ret = 0;
     }
-    else if ((UDS_CFG_SA_TYPE(ctx->current_sa->sa_index) & cfg->sa_type_mask) != 0)
+    else if ((NULL != ctx->current_sa) &&
+             ((UDS_CFG_SA_TYPE(ctx->current_sa->sa_index) & cfg->sa_type_mask) != 0))
     {
         ret = 0;
     }
@@ -353,7 +358,7 @@ static int __uds_svc_read_data_by_identifier(uds_context_t *ctx,
                                              const uint8_t *data, size_t data_len,
                                              uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_SFNS;
+    uint8_t nrc = UDS_NRC_ROOR;
     uint16_t identifier = __UDS_INVALID_DATA_IDENTIFIER;
     size_t data_start = 0;
     size_t res_data_used = 0;
@@ -386,8 +391,8 @@ static int __uds_svc_read_data_by_identifier(uds_context_t *ctx,
                 {
                     if (NULL == ctx->config->data_items[d].cb_read)
                     {
-                        uds_warning(ctx, "cb_read not defined for data with ID 0x%04X\n",
-                                    identifier);
+                        uds_info(ctx, "cb_read not defined for data with ID 0x%04X\n",
+                                 identifier);
                     }
                     else if (__uds_session_check(ctx, &ctx->config->data_items[d].sec_read) != 0)
                     {
@@ -414,9 +419,6 @@ static int __uds_svc_read_data_by_identifier(uds_context_t *ctx,
                         ret = ctx->config->data_items[d].cb_read(ctx->priv, identifier,
                                                                  &res_data[res_data_used],
                                                                  &res_data_item_len);
-                        uds_debug(ctx, "res_data_used = %lu\n", res_data_used);
-                        uds_debug(ctx, "res_data_item_len = %lu\n", res_data_item_len);
-                        uds_debug(ctx, "res_data_len = %lu\n", *res_data_len);
                         if ((res_data_used + res_data_item_len) > *res_data_len)
                         {
                             uds_info(ctx, "no space for data with ID 0x%04X\n", identifier);
@@ -457,6 +459,72 @@ static int __uds_svc_read_data_by_identifier(uds_context_t *ctx,
     else if (UDS_NRC_PR == nrc)
     {
         *res_data_len = res_data_used;
+    }
+
+    return nrc;
+}
+
+static int __uds_svc_write_data_by_identifier(uds_context_t *ctx,
+                                             const uint8_t *data, size_t data_len,
+                                             uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_ROOR;
+    uint16_t identifier = __UDS_INVALID_DATA_IDENTIFIER;
+    unsigned long d = 0;
+    int ret = -1;
+
+    if (data_len < 3)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        identifier = (data[0] << 8) | (data[1] << 0);
+
+        uds_debug(ctx, "requested to write data with ID 0x%04X\n", identifier);
+
+        for (d = 0; d < ctx->config->num_data_items; d++)
+        {
+            if (ctx->config->data_items[d].identifier == identifier)
+            {
+                if (NULL == ctx->config->data_items[d].cb_write)
+                {
+                    uds_info(ctx, "cb_write not defined for data with ID 0x%04X\n",
+                                identifier);
+                    nrc = UDS_NRC_ROOR;
+                }
+                else if (__uds_session_check(ctx, &ctx->config->data_items[d].sec_write) != 0)
+                {
+                    uds_debug(ctx, "data with ID 0x%04X cannot be written in active session\n",
+                              identifier);
+                    nrc = UDS_NRC_ROOR;
+                }
+                else if (__uds_security_check(ctx, &ctx->config->data_items[d].sec_write) != 0)
+                {
+                    uds_debug(ctx, "data with ID 0x%04X cannot be written with current SA\n",
+                              identifier);
+                    nrc = UDS_NRC_SAD;
+                }
+                else
+                {
+                    ret = ctx->config->data_items[d].cb_write(ctx->priv, identifier,
+                                                              &data[2], (data_len - 2));
+                    if (ret != 0)
+                    {
+                        uds_err(ctx, "failed to write data with ID 0x%04X\n", identifier);
+                        nrc = UDS_NRC_GPF;
+                    }
+                    else
+                    {
+                        nrc = UDS_NRC_PR;
+                        res_data[0] = (identifier >> 8) & 0xFF;
+                        res_data[1] = (identifier >> 0) & 0xFF;
+                        *res_data_len = 2;
+                    }
+                }
+            }
+            break;
+        }
     }
 
     return nrc;
@@ -814,6 +882,8 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
         break;
 
     case UDS_SVC_WDBI:
+        nrc = __uds_svc_write_data_by_identifier(ctx, data, data_len,
+                                                 res_data, &res_data_len);
         break;
 
     case UDS_SVC_IOCBI:
