@@ -51,16 +51,16 @@ static inline int __uds_session_check(uds_context_t *ctx, const uds_security_cfg
 
     uds_debug(ctx, "session_check with active session = 0x%02X\n",
               ctx->current_session->session_type);
-    uds_debug(ctx, "sm[0] = 0x%016lX\n", cfg->session_mask[0]);
-    uds_debug(ctx, "sm[1] = 0x%016lX\n", cfg->session_mask[1]);
+    uds_debug(ctx, "standars_sm = 0x%016lX\n", cfg->standard_session_mask);
+    uds_debug(ctx, "specific_sm = 0x%016lX\n", cfg->specific_session_mask);
 
     if ((ctx->current_session->session_type < 64) &&
-        ((1UL << ctx->current_session->session_type) & cfg->session_mask[0]) != 0)
+        ((UDS_CFG_SESSION_MASK(ctx->current_session->session_type) & cfg->standard_session_mask) != 0))
     {
         ret = 0;
     }
     else if ((ctx->current_session->session_type >= 64) &&
-             ((1UL << ctx->current_session->session_type) & cfg->session_mask[1]) != 0)
+             ((UDS_CFG_SESSION_MASK(ctx->current_session->session_type) & cfg->specific_session_mask) != 0))
     {
         ret = 0;
     }

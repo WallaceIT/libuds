@@ -381,12 +381,12 @@ static const uds_config_data_t data_items[] =
         .identifier = 0xF190,
         .cb_read = data_read,
         .sec_read.sa_type_mask = UDS_CFG_SA_TYPE_NONE,
-        .sec_read.session_mask[0] = UDS_CFG_SESSION_MASK_ALL,
-        .sec_read.session_mask[1] = UDS_CFG_SESSION_MASK_ALL,
+        .sec_read.standard_session_mask = UDS_CFG_SESSION_MASK_ALL,
+        .sec_read.specific_session_mask = UDS_CFG_SESSION_MASK_ALL,
         .cb_write = data_write,
         .sec_write.sa_type_mask = UDS_CFG_SA_TYPE(0),
-        .sec_write.session_mask[0] = UDS_CFG_SESSION_MASK(3),
-        .sec_write.session_mask[1] = UDS_CFG_SESSION_MASK_NONE,
+        .sec_write.standard_session_mask = UDS_CFG_SESSION_MASK(3),
+        .sec_write.specific_session_mask = UDS_CFG_SESSION_MASK_NONE,
     }
 };
 

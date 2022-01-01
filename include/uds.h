@@ -14,7 +14,8 @@
 
 typedef struct __uds_security_cfg
 {
-    uint64_t session_mask[2];
+    uint64_t standard_session_mask;
+    uint64_t specific_session_mask;
     uint32_t sa_type_mask;
 } uds_security_cfg_t;
 
