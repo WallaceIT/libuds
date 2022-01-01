@@ -1,4 +1,6 @@
 
+SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall")
+
 set(SOURCES
     uds.c
 )

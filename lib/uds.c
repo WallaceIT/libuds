@@ -30,6 +30,8 @@ static void __uds_reset_to_default_session(uds_context_t *ctx)
 {
     unsigned int s = 0;
 
+    uds_info(ctx, "resetting session to default\n");
+
     for (s = 0; s < ctx->config->num_session_config; s++)
     {
         if (ctx->config->session_config[s].session_type == 0x00)
@@ -74,7 +76,7 @@ static inline int __uds_security_check(uds_context_t *ctx, const uds_security_cf
 
     uds_debug(ctx, "security_check with current sa_index = %d\n",
               (NULL != ctx->current_sa) ? ctx->current_sa->sa_index : -1);
-    uds_debug(ctx, "sa_tm = 0x%016lX\n", cfg->sa_type_mask);
+    uds_debug(ctx, "sa_tm = 0x%08X\n", cfg->sa_type_mask);
 
     if (cfg->sa_type_mask == 0)
     {
@@ -136,6 +138,12 @@ static uint8_t __uds_svc_session_control(uds_context_t *ctx,
             {
                 uds_info(ctx, "entering session 0x%02X\n", requested_session);
                 ctx->current_session = &ctx->config->session_config[s];
+
+                if ((NULL != ctx->current_sa) &&
+                    ((UDS_CFG_SA_TYPE(ctx->current_sa->sa_index) & ctx->config->session_config[s].sa_type_mask) == 0))
+                {
+                    ctx->current_sa = NULL;
+                }
                 break;
             }
         }
@@ -407,7 +415,8 @@ static uint8_t __uds_svc_read_data_by_identifier(uds_context_t *ctx,
                     }
                     else if ((res_data_used + 2) >= *res_data_len)
                     {
-                        uds_info(ctx, "no space for identifier and data for ID 0x%04X\n");
+                        uds_info(ctx, "no space for identifier and data for ID 0x%04X\n",
+                                 identifier);
                         nrc = UDS_NRC_RTL;
                     }
                     else
@@ -624,7 +633,7 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
         }
         else if (ctx->current_sa_seed != sa_index)
         {
-            nrc == UDS_NRC_RSE;
+            nrc = UDS_NRC_RSE;
         }
         else
         {
@@ -948,8 +957,8 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
          * used for the request message (exception see Annex A.1 in definition of NRC 0x78).
          */
         if ((UDS_ADDRESS_FUNCTIONAL != addr_type) ||
-            ((UDS_NRC_SNS != nrc) && (UDS_NRC_SNSIAS != nrc) ||
-             (UDS_NRC_SFNS != nrc) || (UDS_NRC_SFNSIAS != nrc) ||
+            ((UDS_NRC_SNS != nrc) && (UDS_NRC_SNSIAS != nrc) &&
+             (UDS_NRC_SFNS != nrc) && (UDS_NRC_SFNSIAS != nrc) &&
              (UDS_NRC_ROOR != nrc)))
         {
             ctx->response_buffer[0] = UDS_NR_SI;
@@ -995,6 +1004,8 @@ static int __uds_init(uds_context_t *ctx, const uds_config_t *config,
     {
         uds_warning(ctx, "P2max time is set to 0ms\n");
     }
+
+    __uds_reset_to_default_session(ctx);
 
     return ret;
 }
