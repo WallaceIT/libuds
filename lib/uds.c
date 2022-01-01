@@ -13,15 +13,46 @@
 #define __UDS_SUPPRESS_PR(x) (UDS_SPRMINB==(x&UDS_SPRMINB))
 
 #define __UDS_INVALID_SA_INDEX 0xFF
+#define __UDS_INVALID_DATA_IDENTIFIER 0xFFFF
+
+static const uds_session_cfg_t __uds_default_session =
+{
+    .session_type = 0x00,
+    .sa_type_mask = 0UL,
+};
 
 static inline uint8_t __uds_sat_to_sa_index(const uint8_t sat)
 {
     return ((sat - 1) / 2);
 }
 
+static void __uds_reset_to_default_session(uds_context_t *ctx)
+{
+    unsigned int s = 0;
+
+    for (s = 0; s < ctx->config->num_session_config; s++)
+    {
+        if (ctx->config->session_config[s].session_type == 0x00)
+        {
+            ctx->current_session = &ctx->config->session_config[s];
+            break;
+        }
+    }
+
+    if (s == ctx->config->num_session_config)
+    {
+        ctx->current_session = &__uds_default_session;
+    }
+}
+
 static inline int __uds_session_check(uds_context_t *ctx, const uds_security_cfg_t* cfg)
 {
     int ret = -1;
+
+    uds_debug(ctx, "session_check with active session = 0x%02X\n",
+              ctx->current_session->session_type);
+    uds_debug(ctx, "sm[0] = 0x%016X\n", cfg->session_mask[0]);
+    uds_debug(ctx, "sm[1] = 0x%016X\n", cfg->session_mask[1]);
 
     if ((ctx->current_session->session_type < 64) &&
         ((1UL << ctx->current_session->session_type) & cfg->session_mask[0]) != 0)
@@ -318,6 +349,119 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
     return nrc;
 }
 
+static int __uds_svc_read_data_by_identifier(uds_context_t *ctx,
+                                             const uint8_t *data, size_t data_len,
+                                             uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_SFNS;
+    uint16_t identifier = __UDS_INVALID_DATA_IDENTIFIER;
+    size_t data_start = 0;
+    size_t res_data_used = 0;
+    size_t res_data_item_len = 0;
+    unsigned long d = 0;
+    int ret = 0;
+
+    if ((0 == data_len) || ((data_len % 2) != 0))
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else if ((data_len + (data_len / 2)) > *res_data_len)
+    {
+        /* Available space for response shall fit at least the requested
+         * identifiers and at least one additional byte for each of them */
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        nrc = UDS_NRC_PR;
+        for (data_start = 0; data_start < data_len; data_start += 2)
+        {
+            identifier = (data[data_start] << 8) | (data[data_start + 1] << 0);
+
+            uds_debug(ctx, "requested to read data with ID 0x%04X\n", identifier);
+
+            for (d = 0; d < ctx->config->num_data_items; d++)
+            {
+                if (ctx->config->data_items[d].identifier == identifier)
+                {
+                    if (NULL == ctx->config->data_items[d].cb_read)
+                    {
+                        uds_warning(ctx, "cb_read not defined for data with ID 0x%04X\n",
+                                    identifier);
+                    }
+                    else if (__uds_session_check(ctx, &ctx->config->data_items[d].sec_read) != 0)
+                    {
+                        uds_debug(ctx, "data with ID 0x%04X cannot be read in active session\n",
+                                  identifier);
+                    }
+                    else if (__uds_security_check(ctx, &ctx->config->data_items[d].sec_read) != 0)
+                    {
+                        uds_debug(ctx, "data with ID 0x%04X cannot be read with current SA\n",
+                                  identifier);
+                        nrc = UDS_NRC_SAD;
+                    }
+                    else if ((res_data_used + 2) >= *res_data_len)
+                    {
+                        uds_info(ctx, "no space for identifier and data for ID 0x%04X\n");
+                        nrc = UDS_NRC_RTL;
+                    }
+                    else
+                    {
+                        res_data[res_data_used] = (identifier >> 8) & 0xFF;
+                        res_data[res_data_used + 1] = (identifier >> 0) & 0xFF;
+                        res_data_used += 2;
+                        res_data_item_len = *res_data_len - res_data_used;
+                        ret = ctx->config->data_items[d].cb_read(ctx->priv, identifier,
+                                                                 &res_data[res_data_used],
+                                                                 &res_data_item_len);
+                        uds_debug(ctx, "res_data_used = %lu\n", res_data_used);
+                        uds_debug(ctx, "res_data_item_len = %lu\n", res_data_item_len);
+                        uds_debug(ctx, "res_data_len = %lu\n", *res_data_len);
+                        if ((res_data_used + res_data_item_len) > *res_data_len)
+                        {
+                            uds_info(ctx, "no space for data with ID 0x%04X\n", identifier);
+                            nrc = UDS_NRC_RTL;
+                        }
+                        else if (0 != ret)
+                        {
+                            uds_err(ctx, "failed to read data with ID 0x%04X\n", identifier);
+                            nrc = UDS_NRC_CNC;
+                        }
+                        else
+                        {
+                            uds_debug(ctx, "data with ID 0x%04X read successfully (len = %lu)\n",
+                                      identifier, res_data_item_len);
+                            res_data_used += res_data_item_len;
+                        }
+                    }
+                    break;
+                }
+            }
+
+            if (UDS_NRC_PR != nrc)
+            {
+                break;
+            }
+        }
+    }
+
+    if ((UDS_NRC_PR == nrc) && (0 == res_data_used))
+    {
+        /* One of the following condition verified:
+         *  - none of the requested identifiers are supported by the device
+         *  - none of the requested identifiers are supported in the current session
+         *  - the requested dynamic identifier has not been assigned yet
+         */
+        nrc = UDS_NRC_ROOR;
+    }
+    else if (UDS_NRC_PR == nrc)
+    {
+        *res_data_len = res_data_used;
+    }
+
+    return nrc;
+}
+
 static int __uds_svc_secure_access_delay_timer_active(uds_context_t *ctx)
 {
     // TODO: delay timer configuration and management
@@ -371,11 +515,11 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
             {
                 if (ctx->config->sa_config[l].sa_index == sa_index)
                 {
-                    if (NULL != ctx->config->sa_config[l].request_seed)
+                    if (NULL != ctx->config->sa_config[l].cb_request_seed)
                     {
-                        ret = ctx->config->sa_config[l].request_seed(ctx->priv, sa_index,
-                                                                     in_data, in_data_len,
-                                                                     &res_data[1], res_data_len);
+                        ret = ctx->config->sa_config[l].cb_request_seed(ctx->priv, sa_index,
+                                                                        in_data, in_data_len,
+                                                                        &res_data[1], res_data_len);
                         if (ret < 0)
                         {
                             uds_info(ctx, "request_seed for SA 0x%02X failed\n", sa_index);
@@ -422,10 +566,10 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
             {
                 if (ctx->config->sa_config[l].sa_index == sa_index)
                 {
-                    if (NULL != ctx->config->sa_config[l].validate_key)
+                    if (NULL != ctx->config->sa_config[l].cb_validate_key)
                     {
-                        ret = ctx->config->sa_config[l].validate_key(ctx->priv, sa_index,
-                                                                     in_data, in_data_len);
+                        ret = ctx->config->sa_config[l].cb_validate_key(ctx->priv, sa_index,
+                                                                        in_data, in_data_len);
                         if (ret < 0)
                         {
                             uds_info(ctx, "validate_key for SA 0x%02X failed\n", sa_index);
@@ -620,7 +764,7 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
                               const uds_address_e addr_type)
 {
     uint8_t *res_data = &ctx->response_buffer[1];
-    size_t res_data_len = sizeof(ctx->response_buffer);
+    size_t res_data_len = sizeof(ctx->response_buffer) - 1;
     uint8_t nrc = UDS_NRC_SNS;
     int ret = 0;
 
@@ -645,6 +789,8 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
         break;
 
     case UDS_SVC_RDBI:
+        nrc = __uds_svc_read_data_by_identifier(ctx, data, data_len,
+                                                res_data, &res_data_len);
         break;
 
     case UDS_SVC_RMBA:
@@ -751,9 +897,9 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
     return ret;
 }
 
-static int __uds_init(uds_context_t *ctx, const uds_config_t *config, void *priv, unsigned int loglevel)
+static int __uds_init(uds_context_t *ctx, const uds_config_t *config,
+                      void *priv, unsigned int loglevel)
 {
-    unsigned int l;
     int ret = 0;
 
     // Init context

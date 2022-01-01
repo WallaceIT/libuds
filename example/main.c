@@ -321,8 +321,24 @@ static const uds_sa_cfg_t sas[] =
 {
     {
         .sa_index = 0,
-        .request_seed = sa_request_seed,
-        .validate_key = sa_validate_key,
+        .cb_request_seed = sa_request_seed,
+        .cb_validate_key = sa_validate_key,
+    }
+};
+
+static int data_read(void *priv, uint16_t identifier, uint8_t *data, size_t *len)
+{
+    return 0;
+}
+
+static const uds_config_data_t data_items[] =
+{
+    {
+        .identifier = 0xF190,
+        .cb_read = data_read,
+        .sec_read.sa_type_mask = UDS_CFG_SA_TYPE_NONE,
+        .sec_read.session_mask[0] = UDS_CFG_SESSION_MASK_ALL,
+        .sec_read.session_mask[1] = UDS_CFG_SESSION_MASK_ALL,
     }
 };
 
@@ -338,6 +354,9 @@ static const uds_config_t uds_config =
     .num_sa_config = sizeof(sas) / sizeof(uds_sa_cfg_t),
 
     .cb_send = uds_send_callback,
+
+    .data_items = data_items,
+    .num_data_items = sizeof(data_items) / sizeof(uds_config_data_t),
 };
 
 int main(int argc, char *argv[])

@@ -4,8 +4,12 @@
 
 #include <stdint.h>
 
-#define UDS_CFG_SA_TYPE_ALL 0xFFFFFFFFFFFFFFFF
-#define UDS_CFG_SA_TYPE(x) (0x01 << x)
+#define UDS_CFG_SA_TYPE_NONE        (0x0000000000000000)
+#define UDS_CFG_SA_TYPE_ALL         (0xFFFFFFFFFFFFFFFF)
+#define UDS_CFG_SA_TYPE(x)          (0x0000000000000001 << x)
+
+#define UDS_CFG_SESSION_MASK(x)     (0x0000000000000001 << x)
+#define UDS_CFG_SESSION_MASK_ALL    (0xFFFFFFFFFFFFFFFF)
 
 typedef struct __uds_security_cfg
 {
@@ -19,77 +23,76 @@ typedef struct __uds_session_cfg
     uint64_t sa_type_mask;
 } uds_session_cfg_t;
 
-typedef int (*uds_request_seed_cb_t)(void *priv, const uint8_t sa_index,
-                                     const uint8_t in_data[], size_t in_data_len,
-                                     uint8_t out_seed[], size_t *out_seed_len);
-typedef int (*uds_validate_key_cb_t)(void *priv, const uint8_t sa_index,
-                                     const uint8_t key[], size_t key_len);
-
 typedef struct __uds_sa_cfg
 {
     uint8_t sa_index;
-    uds_request_seed_cb_t request_seed;
-    uds_validate_key_cb_t validate_key;
+    int (*cb_request_seed)(void *priv, const uint8_t sa_index,
+                           const uint8_t in_data[], size_t in_data_len,
+                           uint8_t out_seed[], size_t *out_seed_len);
+    int (*cb_validate_key)(void *priv, const uint8_t sa_index,
+                           const uint8_t key[], size_t key_len);
 } uds_sa_cfg_t;
 
-typedef int (*uds_ecureset_hard_cb_t)(void *priv);
-typedef int (*uds_ecureset_keyoffon_cb_t)(void *priv);
-typedef int (*uds_ecureset_soft_cb_t)(void *priv);
-typedef int (*uds_ecureset_enable_rps_cb_t)(void *priv, uint8_t power_down_time);
-typedef int (*uds_ecureset_disable_rps_cb_t)(void *priv);
-typedef int (*uds_ecureset_vms_cb_t)(void *priv, uint8_t reset_type);
-typedef int (*uds_ecureset_sss_cb_t)(void *priv, uint8_t reset_type);
-
-struct __uds_config_ecureset
+typedef struct __uds_config_ecureset
 {
-    uds_ecureset_hard_cb_t cb_reset_hard;
+    int (*cb_reset_hard)(void *priv);
     uds_security_cfg_t sec_reset_hard;
 
-    uds_ecureset_keyoffon_cb_t cb_reset_keyoffon;
+    int (*cb_reset_keyoffon)(void *priv);
     uds_security_cfg_t sec_reset_keyoffon;
 
-    uds_ecureset_soft_cb_t cb_reset_soft;
+    int (*cb_reset_soft)(void *priv);
     uds_security_cfg_t sec_reset_soft;
 
-    uds_ecureset_enable_rps_cb_t cb_enable_rps;
-    uds_ecureset_disable_rps_cb_t cb_disable_rps;
+    int (*cb_enable_rps)(void *priv, uint8_t power_down_time);
+    int (*cb_disable_rps)(void *priv);
     uds_security_cfg_t sec_rps;
 
-    uds_ecureset_vms_cb_t cb_reset_vms;
+    int (*cb_reset_vms)(void *priv, uint8_t reset_type);
     uds_security_cfg_t sec_reset_vms;
 
-    uds_ecureset_sss_cb_t cb_reset_sss;
+    int (*cb_reset_sss)(void *priv, uint8_t reset_type);
     uds_security_cfg_t sec_reset_sss;
-};
+} uds_config_ecureset_t;
 
-typedef int (*uds_dtc_settings_onoff_cb_t)(void *priv,
-                                           const uint8_t *data, size_t data_len);
-typedef int (*uds_dtc_settings_s_cb_t)(void *priv, uint8_t dtc_setting_type,
-                                       const uint8_t *data, size_t data_len);
-
-struct __uds_config_dtc_settings
+typedef struct __uds_config_dtc_settings
 {
-    uds_dtc_settings_onoff_cb_t cb_dtc_on;
+    int (*cb_dtc_on)(void *priv, const uint8_t *data, size_t data_len);
     uds_security_cfg_t sec_dtc_on;
 
-    uds_dtc_settings_onoff_cb_t cb_dtc_off;
+    int (*cb_dtc_off)(void *priv, const uint8_t *data, size_t data_len);
     uds_security_cfg_t sec_dtc_off;
 
-    uds_dtc_settings_s_cb_t cb_dtc_settings_vms;
+    int (*cb_dtc_settings_vms)(void *priv, uint8_t dtc_setting_type,
+                               const uint8_t *data, size_t data_len);
     uds_security_cfg_t sec_dtc_settings_vms;
 
-    uds_dtc_settings_s_cb_t cb_dtc_settings_sss;
+    int (*cb_dtc_settings_sss)(void *priv, uint8_t dtc_setting_type,
+                               const uint8_t *data, size_t data_len);
     uds_security_cfg_t sec_dtc_settings_sss;
-};
+} uds_config_dtc_settings_t;
 
-typedef int (*uds_send_cb_t)(void *priv, const uint8_t data[], size_t len);
+typedef struct __uds_config_data
+{
+    uint16_t identifier;
+
+    /* Callback shall return -1 on failure; if failure is due to insufficient
+     *  space, data_len shall also be set to total required space */
+    int (*cb_read)(void *priv, uint16_t identifier,
+                   uint8_t *data, size_t *data_len);
+    uds_security_cfg_t sec_read;
+
+    int (*cb_write)(void *priv, uint16_t identifier,
+                    const uint8_t *data, const size_t data_len);
+    uds_security_cfg_t sec_write;
+} uds_config_data_t;
 
 typedef struct __uds_config
 {
     uint16_t p2;
     uint16_t p2max;
 
-    uds_send_cb_t cb_send;
+    int (*cb_send)(void *priv, const uint8_t data[], size_t len);
 
     const uds_session_cfg_t *session_config;
     unsigned long num_session_config;
@@ -97,9 +100,11 @@ typedef struct __uds_config
     const uds_sa_cfg_t *sa_config;
     unsigned long num_sa_config;
 
-    struct __uds_config_ecureset ecureset;
-    struct __uds_config_dtc_settings dtc_settings;
+    const uds_config_ecureset_t ecureset;
+    const uds_config_dtc_settings_t dtc_settings;
 
+    const uds_config_data_t *data_items;
+    unsigned long num_data_items;
 } uds_config_t;
 
 typedef struct __uds_context
@@ -114,7 +119,7 @@ typedef struct __uds_context
     uint8_t current_sa_seed;
     const uds_sa_cfg_t *current_sa;
 
-    uint8_t response_buffer[4096];
+    uint8_t response_buffer[4095];
 } uds_context_t;
 
 typedef enum __uds_address
