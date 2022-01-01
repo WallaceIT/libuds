@@ -354,7 +354,7 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
     return nrc;
 }
 
-static int __uds_svc_read_data_by_identifier(uds_context_t *ctx,
+static uint8_t __uds_svc_read_data_by_identifier(uds_context_t *ctx,
                                              const uint8_t *data, size_t data_len,
                                              uint8_t *res_data, size_t *res_data_len)
 {
@@ -464,7 +464,7 @@ static int __uds_svc_read_data_by_identifier(uds_context_t *ctx,
     return nrc;
 }
 
-static int __uds_svc_write_data_by_identifier(uds_context_t *ctx,
+static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
                                              const uint8_t *data, size_t data_len,
                                              uint8_t *res_data, size_t *res_data_len)
 {
@@ -530,7 +530,7 @@ static int __uds_svc_write_data_by_identifier(uds_context_t *ctx,
     return nrc;
 }
 
-static int __uds_svc_secure_access_delay_timer_active(uds_context_t *ctx)
+static int __uds_secure_access_delay_timer_active(uds_context_t *ctx)
 {
     // TODO: delay timer configuration and management
     return 0;
@@ -571,7 +571,7 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
         {
             nrc = UDS_NRC_CNC;
         }
-        else if (0 != __uds_svc_secure_access_delay_timer_active(ctx))
+        else if (0 != __uds_secure_access_delay_timer_active(ctx))
         {
             nrc = UDS_NRC_RTDNE;
         }
