@@ -764,7 +764,7 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
                               const uds_address_e addr_type)
 {
     uint8_t *res_data = &ctx->response_buffer[1];
-    size_t res_data_len = sizeof(ctx->response_buffer) - 1;
+    size_t res_data_len = ctx->response_buffer_len - 1;
     uint8_t nrc = UDS_NRC_SNS;
     int ret = 0;
 
@@ -898,6 +898,7 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
 }
 
 static int __uds_init(uds_context_t *ctx, const uds_config_t *config,
+                      uint8_t *response_buffer, size_t response_buffer_len,
                       void *priv, unsigned int loglevel)
 {
     int ret = 0;
@@ -906,9 +907,13 @@ static int __uds_init(uds_context_t *ctx, const uds_config_t *config,
     memset(ctx, 0, sizeof(uds_context_t));
 
     ctx->config = config;
+    ctx->response_buffer = response_buffer;
+    ctx->response_buffer_len = response_buffer_len;
     ctx->priv = priv;
     ctx->loglevel = loglevel;
     ctx->current_sa_seed = __UDS_INVALID_SA_INDEX;
+
+    memset(ctx->response_buffer, 0, ctx->response_buffer_len);
 
     // Check and validate config
     if (0 == ctx->config->p2)
@@ -924,7 +929,8 @@ static int __uds_init(uds_context_t *ctx, const uds_config_t *config,
     return ret;
 }
 
-int uds_init(uds_context_t *ctx, const uds_config_t *config, void *priv)
+int uds_init(uds_context_t *ctx, const uds_config_t *config,
+             uint8_t *response_buffer, size_t response_buffer_len, void *priv)
 {
     char *env_tmp = NULL;
     unsigned int loglevel = 4;
@@ -947,9 +953,20 @@ int uds_init(uds_context_t *ctx, const uds_config_t *config, void *priv)
         uds_err(ctx, "config shall be supplied to init function\n");
         ret = -1;
     }
+    else if (NULL == response_buffer)
+    {
+        uds_err(ctx, "res_buffer shall be supplied to init function\n");
+        ret = -1;
+    }
+    else if (7 >= response_buffer_len)
+    {
+        uds_err(ctx, "res_buffer shall be at least 7 bytes long\n");
+        ret = -1;
+    }
     else
     {
-        ret = __uds_init(ctx, config, priv, loglevel);
+        ret = __uds_init(ctx, config, response_buffer, response_buffer_len,
+                         priv, loglevel);
     }
 
     return ret;

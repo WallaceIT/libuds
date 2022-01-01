@@ -366,6 +366,7 @@ int main(int argc, char *argv[])
     uint32_t v_tmp[4];
 
     uds_context_t uds_ctx;
+    uint8_t uds_buffer[4095];
 
     int fd_timer_uds = -1;
     int fd_signals = -1;
@@ -404,7 +405,7 @@ int main(int argc, char *argv[])
     }
 
     // Intialize UDS library
-    uds_init(&uds_ctx, &uds_config, &private_data);
+    uds_init(&uds_ctx, &uds_config, uds_buffer, sizeof(uds_buffer), &private_data);
 
     // Create poller
     epollfd = epoll_create1(0);

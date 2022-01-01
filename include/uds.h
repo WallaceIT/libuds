@@ -119,7 +119,8 @@ typedef struct __uds_context
     uint8_t current_sa_seed;
     const uds_sa_cfg_t *current_sa;
 
-    uint8_t response_buffer[4095];
+    uint8_t *response_buffer;
+    size_t response_buffer_len;
 } uds_context_t;
 
 typedef enum __uds_address
@@ -128,7 +129,8 @@ typedef enum __uds_address
     UDS_ADDRESS_FUNCTIONAL,
 } uds_address_e;
 
-int uds_init(uds_context_t *ctx, const uds_config_t *config, void *priv);
+int uds_init(uds_context_t *ctx, const uds_config_t *config,
+             uint8_t *response_buffer, size_t response_buffer_len, void *priv);
 void uds_deinit(uds_context_t *ctx);
 int uds_receive(uds_context_t *ctx, const uds_address_e addr_type,
                 const uint8_t *data, const size_t len);
