@@ -89,6 +89,20 @@ typedef struct __uds_config_data
     uds_security_cfg_t sec_write;
 } uds_config_data_t;
 
+typedef struct __uds_config_memory_region
+{
+    const void *start;
+    const void *stop;
+
+    int (*cb_read)(void *priv, const void *address,
+                   uint8_t *data, const size_t data_len);
+    uds_security_cfg_t sec_read;
+
+    int (*cb_write)(void *priv, const void *address,
+                    const uint8_t *data, const size_t data_len);
+    uds_security_cfg_t sec_write;
+} uds_config_memory_region_t;
+
 typedef struct __uds_config
 {
     uint16_t p2;
@@ -107,6 +121,9 @@ typedef struct __uds_config
 
     const uds_config_data_t *data_items;
     unsigned long num_data_items;
+
+    const uds_config_memory_region_t *mem_regions;
+    unsigned long num_mem_regions;
 } uds_config_t;
 
 typedef struct __uds_context

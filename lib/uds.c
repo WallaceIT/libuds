@@ -363,8 +363,8 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
 }
 
 static uint8_t __uds_svc_read_data_by_identifier(uds_context_t *ctx,
-                                             const uint8_t *data, size_t data_len,
-                                             uint8_t *res_data, size_t *res_data_len)
+                                                 const uint8_t *data, size_t data_len,
+                                                 uint8_t *res_data, size_t *res_data_len)
 {
     uint8_t nrc = UDS_NRC_ROOR;
     uint16_t identifier = __UDS_INVALID_DATA_IDENTIFIER;
@@ -474,8 +474,8 @@ static uint8_t __uds_svc_read_data_by_identifier(uds_context_t *ctx,
 }
 
 static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
-                                             const uint8_t *data, size_t data_len,
-                                             uint8_t *res_data, size_t *res_data_len)
+                                                  const uint8_t *data, size_t data_len,
+                                                  uint8_t *res_data, size_t *res_data_len)
 {
     uint8_t nrc = UDS_NRC_ROOR;
     uint16_t identifier = __UDS_INVALID_DATA_IDENTIFIER;
@@ -533,6 +533,250 @@ static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
                 }
             }
             break;
+        }
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
+                                                const uint8_t *data, size_t data_len,
+                                                uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_SNS;
+    uint8_t addr_len = 0;
+    uint8_t size_len = 0;
+    void * addr = 0;
+    size_t size = 0;
+    long p = 0;
+    int ret;
+
+    if (data_len < 3)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        addr_len = (data[0] >> 0) & 0x0F;
+        size_len = (data[0] >> 4) & 0x0F;
+
+        if ((1 + addr_len + size_len) > data_len)
+        {
+            nrc = UDS_NRC_IMLOIF;
+        }
+        else
+        {
+            nrc = UDS_NRC_PR;
+
+            for (p = addr_len - 1; p >= 0; p--)
+            {
+                if (p < sizeof(void*))
+                {
+                    addr = (void *)((unsigned long long)addr | ((0xFFULL & data[1 + p]) << (8 * (addr_len - 1 - p))));
+                }
+                else if (data[1 + p] != 0x00)
+                {
+                    nrc = UDS_NRC_ROOR;
+                    break;
+                }
+            }
+
+            for (p = size_len - 1; p >= 0; p--)
+            {
+                if (p < sizeof(size_t))
+                {
+                    size |= ((0xFFUL & data[1 + addr_len + p]) << (8 * (size_len - 1 - p)));
+                }
+                else if (data[1 + addr_len + p] != 0x00)
+                {
+                    nrc = UDS_NRC_ROOR;
+                    break;
+                }
+            }
+
+            if (UDS_NRC_PR != nrc)
+            {
+                uds_debug(ctx, "requested memory read with invalid parameters\n");
+                // Nothing to do, NRC is already set
+            }
+            else if (size == 0)
+            {
+                uds_info(ctx, "request read of memory at %p with null size\n", addr);
+                nrc = UDS_NRC_ROOR;
+            }
+            else
+            {
+                uds_debug(ctx, "request to read memory at %p, size %lu\n", addr, size);
+
+                for (p = 0; p < ctx->config->num_mem_regions; p++)
+                {
+                    if ((addr >= ctx->config->mem_regions[p].start) &&
+                        (addr <= ctx->config->mem_regions[p].stop) &&
+                        (NULL != ctx->config->mem_regions[p].cb_read))
+                    {
+                        if ((addr + size) > ctx->config->mem_regions[p].stop)
+                        {
+                            uds_debug(ctx, "memory read size too large\n");
+                            nrc = UDS_NRC_ROOR;
+                        }
+                        else if (__uds_session_check(ctx, &ctx->config->mem_regions[p].sec_read) != 0)
+                        {
+                            nrc = UDS_NRC_ROOR;
+                        }
+                        else if (__uds_security_check(ctx, &ctx->config->mem_regions[p].sec_read) != 0)
+                        {
+                            nrc = UDS_NRC_SAD;
+                        }
+                        else
+                        {
+                            ret = ctx->config->mem_regions[p].cb_read(ctx->priv, (void *)addr,
+                                                                      &res_data[0], size);
+                            if (ret != 0)
+                            {
+                                uds_err(ctx, "failed to read memory at %p, len = %lu\n", addr, size);
+                                nrc = UDS_NRC_GR;
+                            }
+                            else
+                            {
+                                *res_data_len = size;
+                                nrc = UDS_NRC_PR;
+                            }
+                        }
+                    }
+                    break;
+                }
+
+                if (p == ctx->config->num_mem_regions)
+                {
+                    uds_debug(ctx, "memory address %p non found in any region\n", addr);
+                    nrc = UDS_NRC_ROOR;
+                }
+            }
+        }
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
+                                                 const uint8_t *data, size_t data_len,
+                                                 uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_SNS;
+    uint8_t addr_len = 0;
+    uint8_t size_len = 0;
+    void * addr = 0;
+    size_t size = 0;
+    long p = 0;
+    int ret;
+
+    if (data_len < 4)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        addr_len = (data[0] >> 0) & 0x0F;
+        size_len = (data[0] >> 4) & 0x0F;
+
+        if ((1 + addr_len + size_len) > data_len)
+        {
+            nrc = UDS_NRC_IMLOIF;
+        }
+        else if ((1 + addr_len + size_len) > *res_data_len)
+        {
+            uds_info(ctx, "not enough space provided for memory write response\n");
+            nrc = UDS_NRC_GR;
+        }
+        else
+        {
+            nrc = UDS_NRC_PR;
+
+            for (p = addr_len - 1; p >= 0; p--)
+            {
+                if (p < sizeof(void*))
+                {
+                    addr = (void *)((unsigned long long)addr | ((0xFFULL & data[1 + p]) << (8 * (addr_len - 1 - p))));
+                }
+                else if (data[1 + p] != 0x00)
+                {
+                    nrc = UDS_NRC_ROOR;
+                    break;
+                }
+            }
+
+            for (p = size_len - 1; p >= 0; p--)
+            {
+                if (p < sizeof(size_t))
+                {
+                    size |= ((0xFFUL & data[1 + addr_len + p]) << (8 * (size_len - 1 - p)));
+                }
+                else if (data[1 + addr_len + p] != 0x00)
+                {
+                    nrc = UDS_NRC_ROOR;
+                    break;
+                }
+            }
+
+            if (UDS_NRC_PR != nrc)
+            {
+                uds_debug(ctx, "requested memory write with invalid parameters\n");
+                // Nothing to do, NRC is already set
+            }
+            else if ((1 + addr_len + size_len + size) > data_len)
+            {
+                uds_info(ctx, "not enough data provided for memory write\n");
+                nrc = UDS_NRC_IMLOIF;
+            }
+            else
+            {
+                uds_debug(ctx, "request to write memory at %p, size %lu\n", addr, size);
+
+                for (p = 0; p < ctx->config->num_mem_regions; p++)
+                {
+                    if ((addr >= ctx->config->mem_regions[p].start) &&
+                        (addr <= ctx->config->mem_regions[p].stop) &&
+                        (NULL != ctx->config->mem_regions[p].cb_write))
+                    {
+                        if ((addr + size) > ctx->config->mem_regions[p].stop)
+                        {
+                            uds_debug(ctx, "memory write size too large\n");
+                            nrc = UDS_NRC_ROOR;
+                        }
+                        else if (__uds_session_check(ctx, &ctx->config->mem_regions[p].sec_write) != 0)
+                        {
+                            nrc = UDS_NRC_ROOR;
+                        }
+                        else if (__uds_security_check(ctx, &ctx->config->mem_regions[p].sec_write) != 0)
+                        {
+                            nrc = UDS_NRC_SAD;
+                        }
+                        else
+                        {
+                            ret = ctx->config->mem_regions[p].cb_write(ctx->priv, (void *)addr,
+                                                                       &data[1 + addr_len + size_len],
+                                                                       size);
+                            if (ret != 0)
+                            {
+                                uds_err(ctx, "failed to write memory at %p, len = %lu\n", addr, size);
+                                nrc = UDS_NRC_GPF;
+                            }
+                            else
+                            {
+                                memcpy(res_data, data, (1 + addr_len + size_len));
+                                nrc = UDS_NRC_PR;
+                            }
+                        }
+                    }
+                    break;
+                }
+
+                if (p == ctx->config->num_mem_regions)
+                {
+                    uds_debug(ctx, "memory address %p non found in any region\n", addr);
+                    nrc = UDS_NRC_ROOR;
+                }
+            }
         }
     }
 
@@ -871,6 +1115,8 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
         break;
 
     case UDS_SVC_RMBA:
+        nrc = __uds_svc_read_memory_by_address(ctx, data, data_len,
+                                               res_data, &res_data_len);
         break;
 
     case UDS_SVC_RSDBI:
@@ -914,6 +1160,8 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
         break;
 
     case UDS_SVC_WMBA:
+        nrc = __uds_svc_write_memory_by_address(ctx, data, data_len,
+                                                res_data, &res_data_len);
         break;
 
     case UDS_SVC_TP:
