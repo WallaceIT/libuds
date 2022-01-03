@@ -362,436 +362,15 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
     return nrc;
 }
 
-static uint8_t __uds_svc_read_data_by_identifier(uds_context_t *ctx,
-                                                 const uint8_t *data, size_t data_len,
-                                                 uint8_t *res_data, size_t *res_data_len)
-{
-    uint8_t nrc = UDS_NRC_ROOR;
-    uint16_t identifier = __UDS_INVALID_DATA_IDENTIFIER;
-    size_t data_start = 0;
-    size_t res_data_used = 0;
-    size_t res_data_item_len = 0;
-    unsigned long d = 0;
-    int ret = 0;
-
-    if ((0 == data_len) || ((data_len % 2) != 0))
-    {
-        nrc = UDS_NRC_IMLOIF;
-    }
-    else if ((data_len + (data_len / 2)) > *res_data_len)
-    {
-        /* Available space for response shall fit at least the requested
-         * identifiers and at least one additional byte for each of them */
-        nrc = UDS_NRC_IMLOIF;
-    }
-    else
-    {
-        nrc = UDS_NRC_PR;
-        for (data_start = 0; data_start < data_len; data_start += 2)
-        {
-            identifier = (data[data_start] << 8) | (data[data_start + 1] << 0);
-
-            uds_debug(ctx, "requested to read data with ID 0x%04X\n", identifier);
-
-            for (d = 0; d < ctx->config->num_data_items; d++)
-            {
-                if (ctx->config->data_items[d].identifier == identifier)
-                {
-                    if (NULL == ctx->config->data_items[d].cb_read)
-                    {
-                        uds_info(ctx, "cb_read not defined for data with ID 0x%04X\n",
-                                 identifier);
-                    }
-                    else if (__uds_session_check(ctx, &ctx->config->data_items[d].sec_read) != 0)
-                    {
-                        uds_debug(ctx, "data with ID 0x%04X cannot be read in active session\n",
-                                  identifier);
-                    }
-                    else if (__uds_security_check(ctx, &ctx->config->data_items[d].sec_read) != 0)
-                    {
-                        uds_debug(ctx, "data with ID 0x%04X cannot be read with current SA\n",
-                                  identifier);
-                        nrc = UDS_NRC_SAD;
-                    }
-                    else if ((res_data_used + 2) >= *res_data_len)
-                    {
-                        uds_info(ctx, "no space for identifier and data for ID 0x%04X\n",
-                                 identifier);
-                        nrc = UDS_NRC_RTL;
-                    }
-                    else
-                    {
-                        res_data[res_data_used] = (identifier >> 8) & 0xFF;
-                        res_data[res_data_used + 1] = (identifier >> 0) & 0xFF;
-                        res_data_used += 2;
-                        res_data_item_len = *res_data_len - res_data_used;
-                        ret = ctx->config->data_items[d].cb_read(ctx->priv, identifier,
-                                                                 &res_data[res_data_used],
-                                                                 &res_data_item_len);
-                        if ((res_data_used + res_data_item_len) > *res_data_len)
-                        {
-                            uds_info(ctx, "no space for data with ID 0x%04X\n", identifier);
-                            nrc = UDS_NRC_RTL;
-                        }
-                        else if (0 != ret)
-                        {
-                            uds_err(ctx, "failed to read data with ID 0x%04X\n", identifier);
-                            nrc = UDS_NRC_FPEORA;
-                        }
-                        else
-                        {
-                            uds_debug(ctx, "data with ID 0x%04X read successfully (len = %lu)\n",
-                                      identifier, res_data_item_len);
-                            res_data_used += res_data_item_len;
-                        }
-                    }
-                    break;
-                }
-            }
-
-            if (UDS_NRC_PR != nrc)
-            {
-                break;
-            }
-        }
-    }
-
-    if ((UDS_NRC_PR == nrc) && (0 == res_data_used))
-    {
-        /* One of the following condition verified:
-         *  - none of the requested identifiers are supported by the device
-         *  - none of the requested identifiers are supported in the current session
-         *  - the requested dynamic identifier has not been assigned yet
-         */
-        nrc = UDS_NRC_ROOR;
-    }
-    else if (UDS_NRC_PR == nrc)
-    {
-        *res_data_len = res_data_used;
-    }
-
-    return nrc;
-}
-
-static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
-                                                  const uint8_t *data, size_t data_len,
-                                                  uint8_t *res_data, size_t *res_data_len)
-{
-    uint8_t nrc = UDS_NRC_ROOR;
-    uint16_t identifier = __UDS_INVALID_DATA_IDENTIFIER;
-    unsigned long d = 0;
-    int ret = -1;
-
-    if (data_len < 3)
-    {
-        nrc = UDS_NRC_IMLOIF;
-    }
-    else
-    {
-        identifier = (data[0] << 8) | (data[1] << 0);
-
-        uds_debug(ctx, "requested to write data with ID 0x%04X\n", identifier);
-
-        for (d = 0; d < ctx->config->num_data_items; d++)
-        {
-            if (ctx->config->data_items[d].identifier == identifier)
-            {
-                if (NULL == ctx->config->data_items[d].cb_write)
-                {
-                    uds_info(ctx, "cb_write not defined for data with ID 0x%04X\n",
-                                identifier);
-                    nrc = UDS_NRC_ROOR;
-                }
-                else if (__uds_session_check(ctx, &ctx->config->data_items[d].sec_write) != 0)
-                {
-                    uds_debug(ctx, "data with ID 0x%04X cannot be written in active session\n",
-                              identifier);
-                    nrc = UDS_NRC_ROOR;
-                }
-                else if (__uds_security_check(ctx, &ctx->config->data_items[d].sec_write) != 0)
-                {
-                    uds_debug(ctx, "data with ID 0x%04X cannot be written with current SA\n",
-                              identifier);
-                    nrc = UDS_NRC_SAD;
-                }
-                else
-                {
-                    ret = ctx->config->data_items[d].cb_write(ctx->priv, identifier,
-                                                              &data[2], (data_len - 2));
-                    if (ret != 0)
-                    {
-                        uds_err(ctx, "failed to write data with ID 0x%04X\n", identifier);
-                        nrc = UDS_NRC_GPF;
-                    }
-                    else
-                    {
-                        nrc = UDS_NRC_PR;
-                        res_data[0] = (identifier >> 8) & 0xFF;
-                        res_data[1] = (identifier >> 0) & 0xFF;
-                        *res_data_len = 2;
-                    }
-                }
-            }
-            break;
-        }
-    }
-
-    return nrc;
-}
-
-static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
-                                                const uint8_t *data, size_t data_len,
-                                                uint8_t *res_data, size_t *res_data_len)
-{
-    uint8_t nrc = UDS_NRC_SNS;
-    uint8_t addr_len = 0;
-    uint8_t size_len = 0;
-    void * addr = 0;
-    size_t size = 0;
-    long p = 0;
-    int ret;
-
-    if (data_len < 3)
-    {
-        nrc = UDS_NRC_IMLOIF;
-    }
-    else
-    {
-        addr_len = (data[0] >> 0) & 0x0F;
-        size_len = (data[0] >> 4) & 0x0F;
-
-        if ((1 + addr_len + size_len) > data_len)
-        {
-            nrc = UDS_NRC_IMLOIF;
-        }
-        else
-        {
-            nrc = UDS_NRC_PR;
-
-            for (p = addr_len - 1; p >= 0; p--)
-            {
-                if (p < sizeof(void*))
-                {
-                    addr = (void *)((unsigned long long)addr | ((0xFFULL & data[1 + p]) << (8 * (addr_len - 1 - p))));
-                }
-                else if (data[1 + p] != 0x00)
-                {
-                    nrc = UDS_NRC_ROOR;
-                    break;
-                }
-            }
-
-            for (p = size_len - 1; p >= 0; p--)
-            {
-                if (p < sizeof(size_t))
-                {
-                    size |= ((0xFFUL & data[1 + addr_len + p]) << (8 * (size_len - 1 - p)));
-                }
-                else if (data[1 + addr_len + p] != 0x00)
-                {
-                    nrc = UDS_NRC_ROOR;
-                    break;
-                }
-            }
-
-            if (UDS_NRC_PR != nrc)
-            {
-                uds_debug(ctx, "requested memory read with invalid parameters\n");
-                // Nothing to do, NRC is already set
-            }
-            else if (size == 0)
-            {
-                uds_info(ctx, "request read of memory at %p with null size\n", addr);
-                nrc = UDS_NRC_ROOR;
-            }
-            else
-            {
-                uds_debug(ctx, "request to read memory at %p, size %lu\n", addr, size);
-
-                for (p = 0; p < ctx->config->num_mem_regions; p++)
-                {
-                    if ((addr >= ctx->config->mem_regions[p].start) &&
-                        (addr <= ctx->config->mem_regions[p].stop) &&
-                        (NULL != ctx->config->mem_regions[p].cb_read))
-                    {
-                        if ((addr + size) > ctx->config->mem_regions[p].stop)
-                        {
-                            uds_debug(ctx, "memory read size too large\n");
-                            nrc = UDS_NRC_ROOR;
-                        }
-                        else if (__uds_session_check(ctx, &ctx->config->mem_regions[p].sec_read) != 0)
-                        {
-                            nrc = UDS_NRC_ROOR;
-                        }
-                        else if (__uds_security_check(ctx, &ctx->config->mem_regions[p].sec_read) != 0)
-                        {
-                            nrc = UDS_NRC_SAD;
-                        }
-                        else
-                        {
-                            ret = ctx->config->mem_regions[p].cb_read(ctx->priv, (void *)addr,
-                                                                      &res_data[0], size);
-                            if (ret != 0)
-                            {
-                                uds_err(ctx, "failed to read memory at %p, len = %lu\n", addr, size);
-                                nrc = UDS_NRC_GR;
-                            }
-                            else
-                            {
-                                *res_data_len = size;
-                                nrc = UDS_NRC_PR;
-                            }
-                        }
-                    }
-                    break;
-                }
-
-                if (p == ctx->config->num_mem_regions)
-                {
-                    uds_debug(ctx, "memory address %p non found in any region\n", addr);
-                    nrc = UDS_NRC_ROOR;
-                }
-            }
-        }
-    }
-
-    return nrc;
-}
-
-static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
-                                                 const uint8_t *data, size_t data_len,
-                                                 uint8_t *res_data, size_t *res_data_len)
-{
-    uint8_t nrc = UDS_NRC_SNS;
-    uint8_t addr_len = 0;
-    uint8_t size_len = 0;
-    void * addr = 0;
-    size_t size = 0;
-    long p = 0;
-    int ret;
-
-    if (data_len < 4)
-    {
-        nrc = UDS_NRC_IMLOIF;
-    }
-    else
-    {
-        addr_len = (data[0] >> 0) & 0x0F;
-        size_len = (data[0] >> 4) & 0x0F;
-
-        if ((1 + addr_len + size_len) > data_len)
-        {
-            nrc = UDS_NRC_IMLOIF;
-        }
-        else if ((1 + addr_len + size_len) > *res_data_len)
-        {
-            uds_info(ctx, "not enough space provided for memory write response\n");
-            nrc = UDS_NRC_GR;
-        }
-        else
-        {
-            nrc = UDS_NRC_PR;
-
-            for (p = addr_len - 1; p >= 0; p--)
-            {
-                if (p < sizeof(void*))
-                {
-                    addr = (void *)((unsigned long long)addr | ((0xFFULL & data[1 + p]) << (8 * (addr_len - 1 - p))));
-                }
-                else if (data[1 + p] != 0x00)
-                {
-                    nrc = UDS_NRC_ROOR;
-                    break;
-                }
-            }
-
-            for (p = size_len - 1; p >= 0; p--)
-            {
-                if (p < sizeof(size_t))
-                {
-                    size |= ((0xFFUL & data[1 + addr_len + p]) << (8 * (size_len - 1 - p)));
-                }
-                else if (data[1 + addr_len + p] != 0x00)
-                {
-                    nrc = UDS_NRC_ROOR;
-                    break;
-                }
-            }
-
-            if (UDS_NRC_PR != nrc)
-            {
-                uds_debug(ctx, "requested memory write with invalid parameters\n");
-                // Nothing to do, NRC is already set
-            }
-            else if ((1 + addr_len + size_len + size) > data_len)
-            {
-                uds_info(ctx, "not enough data provided for memory write\n");
-                nrc = UDS_NRC_IMLOIF;
-            }
-            else
-            {
-                uds_debug(ctx, "request to write memory at %p, size %lu\n", addr, size);
-
-                for (p = 0; p < ctx->config->num_mem_regions; p++)
-                {
-                    if ((addr >= ctx->config->mem_regions[p].start) &&
-                        (addr <= ctx->config->mem_regions[p].stop) &&
-                        (NULL != ctx->config->mem_regions[p].cb_write))
-                    {
-                        if ((addr + size) > ctx->config->mem_regions[p].stop)
-                        {
-                            uds_debug(ctx, "memory write size too large\n");
-                            nrc = UDS_NRC_ROOR;
-                        }
-                        else if (__uds_session_check(ctx, &ctx->config->mem_regions[p].sec_write) != 0)
-                        {
-                            nrc = UDS_NRC_ROOR;
-                        }
-                        else if (__uds_security_check(ctx, &ctx->config->mem_regions[p].sec_write) != 0)
-                        {
-                            nrc = UDS_NRC_SAD;
-                        }
-                        else
-                        {
-                            ret = ctx->config->mem_regions[p].cb_write(ctx->priv, (void *)addr,
-                                                                       &data[1 + addr_len + size_len],
-                                                                       size);
-                            if (ret != 0)
-                            {
-                                uds_err(ctx, "failed to write memory at %p, len = %lu\n", addr, size);
-                                nrc = UDS_NRC_GPF;
-                            }
-                            else
-                            {
-                                memcpy(res_data, data, (1 + addr_len + size_len));
-                                nrc = UDS_NRC_PR;
-                            }
-                        }
-                    }
-                    break;
-                }
-
-                if (p == ctx->config->num_mem_regions)
-                {
-                    uds_debug(ctx, "memory address %p non found in any region\n", addr);
-                    nrc = UDS_NRC_ROOR;
-                }
-            }
-        }
-    }
-
-    return nrc;
-}
-
-static int __uds_secure_access_delay_timer_active(uds_context_t *ctx)
+static int __uds_security_access_delay_timer_active(uds_context_t *ctx)
 {
     // TODO: delay timer configuration and management
     return 0;
 }
 
-static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
-                                       const uint8_t *data, size_t data_len,
-                                       uint8_t *res_data, size_t *res_data_len)
+static uint8_t __uds_svc_security_access(uds_context_t *ctx,
+                                         const uint8_t *data, size_t data_len,
+                                         uint8_t *res_data, size_t *res_data_len)
 {
     uint8_t nrc = UDS_NRC_SFNS;
     uint8_t sr = 0x00;
@@ -824,7 +403,7 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
         {
             nrc = UDS_NRC_SFNSIAS;
         }
-        else if (0 != __uds_secure_access_delay_timer_active(ctx))
+        else if (0 != __uds_security_access_delay_timer_active(ctx))
         {
             nrc = UDS_NRC_RTDNE;
         }
@@ -1079,6 +658,426 @@ static uint8_t __uds_svc_control_dtc_settings(uds_context_t *ctx,
     return nrc;
 }
 
+static uint8_t __uds_svc_read_data_by_identifier(uds_context_t *ctx,
+                                                 const uint8_t *data, size_t data_len,
+                                                 uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_ROOR;
+    uint16_t identifier = __UDS_INVALID_DATA_IDENTIFIER;
+    size_t data_start = 0;
+    size_t res_data_used = 0;
+    size_t res_data_item_len = 0;
+    unsigned long d = 0;
+    int ret = 0;
+
+    if ((0 == data_len) || ((data_len % 2) != 0))
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else if ((data_len + (data_len / 2)) > *res_data_len)
+    {
+        /* Available space for response shall fit at least the requested
+         * identifiers and at least one additional byte for each of them */
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        nrc = UDS_NRC_PR;
+        for (data_start = 0; data_start < data_len; data_start += 2)
+        {
+            identifier = (data[data_start] << 8) | (data[data_start + 1] << 0);
+
+            uds_debug(ctx, "requested to read data with ID 0x%04X\n", identifier);
+
+            for (d = 0; d < ctx->config->num_data_items; d++)
+            {
+                if (ctx->config->data_items[d].identifier == identifier)
+                {
+                    if (NULL == ctx->config->data_items[d].cb_read)
+                    {
+                        uds_info(ctx, "cb_read not defined for data with ID 0x%04X\n",
+                                 identifier);
+                    }
+                    else if (__uds_session_check(ctx, &ctx->config->data_items[d].sec_read) != 0)
+                    {
+                        uds_debug(ctx, "data with ID 0x%04X cannot be read in active session\n",
+                                  identifier);
+                    }
+                    else if (__uds_security_check(ctx, &ctx->config->data_items[d].sec_read) != 0)
+                    {
+                        uds_debug(ctx, "data with ID 0x%04X cannot be read with current SA\n",
+                                  identifier);
+                        nrc = UDS_NRC_SAD;
+                    }
+                    else if ((res_data_used + 2) >= *res_data_len)
+                    {
+                        uds_info(ctx, "no space for identifier and data for ID 0x%04X\n",
+                                 identifier);
+                        nrc = UDS_NRC_RTL;
+                    }
+                    else
+                    {
+                        res_data[res_data_used] = (identifier >> 8) & 0xFF;
+                        res_data[res_data_used + 1] = (identifier >> 0) & 0xFF;
+                        res_data_used += 2;
+                        res_data_item_len = *res_data_len - res_data_used;
+                        ret = ctx->config->data_items[d].cb_read(ctx->priv, identifier,
+                                                                 &res_data[res_data_used],
+                                                                 &res_data_item_len);
+                        if ((res_data_used + res_data_item_len) > *res_data_len)
+                        {
+                            uds_info(ctx, "no space for data with ID 0x%04X\n", identifier);
+                            nrc = UDS_NRC_RTL;
+                        }
+                        else if (0 != ret)
+                        {
+                            uds_err(ctx, "failed to read data with ID 0x%04X\n", identifier);
+                            nrc = UDS_NRC_FPEORA;
+                        }
+                        else
+                        {
+                            uds_debug(ctx, "data with ID 0x%04X read successfully (len = %lu)\n",
+                                      identifier, res_data_item_len);
+                            res_data_used += res_data_item_len;
+                        }
+                    }
+                    break;
+                }
+            }
+
+            if (UDS_NRC_PR != nrc)
+            {
+                break;
+            }
+        }
+    }
+
+    if ((UDS_NRC_PR == nrc) && (0 == res_data_used))
+    {
+        /* One of the following condition verified:
+         *  - none of the requested identifiers are supported by the device
+         *  - none of the requested identifiers are supported in the current session
+         *  - the requested dynamic identifier has not been assigned yet
+         */
+        nrc = UDS_NRC_ROOR;
+    }
+    else if (UDS_NRC_PR == nrc)
+    {
+        *res_data_len = res_data_used;
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
+                                                const uint8_t *data, size_t data_len,
+                                                uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_SNS;
+    uint8_t addr_len = 0;
+    uint8_t size_len = 0;
+    void * addr = 0;
+    size_t size = 0;
+    long p = 0;
+    int ret;
+
+    if (data_len < 3)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        addr_len = (data[0] >> 0) & 0x0F;
+        size_len = (data[0] >> 4) & 0x0F;
+
+        if ((1 + addr_len + size_len) > data_len)
+        {
+            nrc = UDS_NRC_IMLOIF;
+        }
+        else
+        {
+            nrc = UDS_NRC_PR;
+
+            for (p = addr_len - 1; p >= 0; p--)
+            {
+                if (p < sizeof(void*))
+                {
+                    addr = (void *)((unsigned long long)addr | ((0xFFULL & data[1 + p]) << (8 * (addr_len - 1 - p))));
+                }
+                else if (data[1 + p] != 0x00)
+                {
+                    nrc = UDS_NRC_ROOR;
+                    break;
+                }
+            }
+
+            for (p = size_len - 1; p >= 0; p--)
+            {
+                if (p < sizeof(size_t))
+                {
+                    size |= ((0xFFUL & data[1 + addr_len + p]) << (8 * (size_len - 1 - p)));
+                }
+                else if (data[1 + addr_len + p] != 0x00)
+                {
+                    nrc = UDS_NRC_ROOR;
+                    break;
+                }
+            }
+
+            if (UDS_NRC_PR != nrc)
+            {
+                uds_debug(ctx, "requested memory read with invalid parameters\n");
+                // Nothing to do, NRC is already set
+            }
+            else if (size == 0)
+            {
+                uds_info(ctx, "request read of memory at %p with null size\n", addr);
+                nrc = UDS_NRC_ROOR;
+            }
+            else
+            {
+                uds_debug(ctx, "request to read memory at %p, size %lu\n", addr, size);
+
+                for (p = 0; p < ctx->config->num_mem_regions; p++)
+                {
+                    if ((addr >= ctx->config->mem_regions[p].start) &&
+                        (addr <= ctx->config->mem_regions[p].stop) &&
+                        (NULL != ctx->config->mem_regions[p].cb_read))
+                    {
+                        if ((addr + size) > ctx->config->mem_regions[p].stop)
+                        {
+                            uds_debug(ctx, "memory read size too large\n");
+                            nrc = UDS_NRC_ROOR;
+                        }
+                        else if (__uds_session_check(ctx, &ctx->config->mem_regions[p].sec_read) != 0)
+                        {
+                            nrc = UDS_NRC_ROOR;
+                        }
+                        else if (__uds_security_check(ctx, &ctx->config->mem_regions[p].sec_read) != 0)
+                        {
+                            nrc = UDS_NRC_SAD;
+                        }
+                        else
+                        {
+                            ret = ctx->config->mem_regions[p].cb_read(ctx->priv, (void *)addr,
+                                                                      &res_data[0], size);
+                            if (ret != 0)
+                            {
+                                uds_err(ctx, "failed to read memory at %p, len = %lu\n", addr, size);
+                                nrc = UDS_NRC_GR;
+                            }
+                            else
+                            {
+                                *res_data_len = size;
+                                nrc = UDS_NRC_PR;
+                            }
+                        }
+                    }
+                    break;
+                }
+
+                if (p == ctx->config->num_mem_regions)
+                {
+                    uds_debug(ctx, "memory address %p non found in any region\n", addr);
+                    nrc = UDS_NRC_ROOR;
+                }
+            }
+        }
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
+                                                  const uint8_t *data, size_t data_len,
+                                                  uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_ROOR;
+    uint16_t identifier = __UDS_INVALID_DATA_IDENTIFIER;
+    unsigned long d = 0;
+    int ret = -1;
+
+    if (data_len < 3)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        identifier = (data[0] << 8) | (data[1] << 0);
+
+        uds_debug(ctx, "requested to write data with ID 0x%04X\n", identifier);
+
+        for (d = 0; d < ctx->config->num_data_items; d++)
+        {
+            if (ctx->config->data_items[d].identifier == identifier)
+            {
+                if (NULL == ctx->config->data_items[d].cb_write)
+                {
+                    uds_info(ctx, "cb_write not defined for data with ID 0x%04X\n",
+                                identifier);
+                    nrc = UDS_NRC_ROOR;
+                }
+                else if (__uds_session_check(ctx, &ctx->config->data_items[d].sec_write) != 0)
+                {
+                    uds_debug(ctx, "data with ID 0x%04X cannot be written in active session\n",
+                              identifier);
+                    nrc = UDS_NRC_ROOR;
+                }
+                else if (__uds_security_check(ctx, &ctx->config->data_items[d].sec_write) != 0)
+                {
+                    uds_debug(ctx, "data with ID 0x%04X cannot be written with current SA\n",
+                              identifier);
+                    nrc = UDS_NRC_SAD;
+                }
+                else
+                {
+                    ret = ctx->config->data_items[d].cb_write(ctx->priv, identifier,
+                                                              &data[2], (data_len - 2));
+                    if (ret != 0)
+                    {
+                        uds_err(ctx, "failed to write data with ID 0x%04X\n", identifier);
+                        nrc = UDS_NRC_GPF;
+                    }
+                    else
+                    {
+                        nrc = UDS_NRC_PR;
+                        res_data[0] = (identifier >> 8) & 0xFF;
+                        res_data[1] = (identifier >> 0) & 0xFF;
+                        *res_data_len = 2;
+                    }
+                }
+            }
+            break;
+        }
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
+                                                 const uint8_t *data, size_t data_len,
+                                                 uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_SNS;
+    uint8_t addr_len = 0;
+    uint8_t size_len = 0;
+    void * addr = 0;
+    size_t size = 0;
+    long p = 0;
+    int ret;
+
+    if (data_len < 4)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        addr_len = (data[0] >> 0) & 0x0F;
+        size_len = (data[0] >> 4) & 0x0F;
+
+        if ((1 + addr_len + size_len) > data_len)
+        {
+            nrc = UDS_NRC_IMLOIF;
+        }
+        else if ((1 + addr_len + size_len) > *res_data_len)
+        {
+            uds_info(ctx, "not enough space provided for memory write response\n");
+            nrc = UDS_NRC_GR;
+        }
+        else
+        {
+            nrc = UDS_NRC_PR;
+
+            for (p = addr_len - 1; p >= 0; p--)
+            {
+                if (p < sizeof(void*))
+                {
+                    addr = (void *)((unsigned long long)addr | ((0xFFULL & data[1 + p]) << (8 * (addr_len - 1 - p))));
+                }
+                else if (data[1 + p] != 0x00)
+                {
+                    nrc = UDS_NRC_ROOR;
+                    break;
+                }
+            }
+
+            for (p = size_len - 1; p >= 0; p--)
+            {
+                if (p < sizeof(size_t))
+                {
+                    size |= ((0xFFUL & data[1 + addr_len + p]) << (8 * (size_len - 1 - p)));
+                }
+                else if (data[1 + addr_len + p] != 0x00)
+                {
+                    nrc = UDS_NRC_ROOR;
+                    break;
+                }
+            }
+
+            if (UDS_NRC_PR != nrc)
+            {
+                uds_debug(ctx, "requested memory write with invalid parameters\n");
+                // Nothing to do, NRC is already set
+            }
+            else if ((1 + addr_len + size_len + size) > data_len)
+            {
+                uds_info(ctx, "not enough data provided for memory write\n");
+                nrc = UDS_NRC_IMLOIF;
+            }
+            else
+            {
+                uds_debug(ctx, "request to write memory at %p, size %lu\n", addr, size);
+
+                for (p = 0; p < ctx->config->num_mem_regions; p++)
+                {
+                    if ((addr >= ctx->config->mem_regions[p].start) &&
+                        (addr <= ctx->config->mem_regions[p].stop) &&
+                        (NULL != ctx->config->mem_regions[p].cb_write))
+                    {
+                        if ((addr + size) > ctx->config->mem_regions[p].stop)
+                        {
+                            uds_debug(ctx, "memory write size too large\n");
+                            nrc = UDS_NRC_ROOR;
+                        }
+                        else if (__uds_session_check(ctx, &ctx->config->mem_regions[p].sec_write) != 0)
+                        {
+                            nrc = UDS_NRC_ROOR;
+                        }
+                        else if (__uds_security_check(ctx, &ctx->config->mem_regions[p].sec_write) != 0)
+                        {
+                            nrc = UDS_NRC_SAD;
+                        }
+                        else
+                        {
+                            ret = ctx->config->mem_regions[p].cb_write(ctx->priv, (void *)addr,
+                                                                       &data[1 + addr_len + size_len],
+                                                                       size);
+                            if (ret != 0)
+                            {
+                                uds_err(ctx, "failed to write memory at %p, len = %lu\n", addr, size);
+                                nrc = UDS_NRC_GPF;
+                            }
+                            else
+                            {
+                                memcpy(res_data, data, (1 + addr_len + size_len));
+                                nrc = UDS_NRC_PR;
+                            }
+                        }
+                    }
+                    break;
+                }
+
+                if (p == ctx->config->num_mem_regions)
+                {
+                    uds_debug(ctx, "memory address %p non found in any region\n", addr);
+                    nrc = UDS_NRC_ROOR;
+                }
+            }
+        }
+    }
+
+    return nrc;
+}
 
 static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
                               const uint8_t *data, size_t data_len,
@@ -1093,6 +1092,7 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
 
     switch (service)
     {
+    /* Diagnostic and Communication Management */
     case UDS_SVC_DSC:
         nrc = __uds_svc_session_control(ctx, data, data_len,
                                         res_data, &res_data_len);
@@ -1103,65 +1103,12 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
                                   res_data, &res_data_len);
         break;
 
-    case UDS_SVC_CDTCI:
-        break;
-
-    case UDS_SVC_RDTCI:
-        break;
-
-    case UDS_SVC_RDBI:
-        nrc = __uds_svc_read_data_by_identifier(ctx, data, data_len,
-                                                res_data, &res_data_len);
-        break;
-
-    case UDS_SVC_RMBA:
-        nrc = __uds_svc_read_memory_by_address(ctx, data, data_len,
-                                               res_data, &res_data_len);
-        break;
-
-    case UDS_SVC_RSDBI:
-        break;
-
     case UDS_SVC_SA:
-        nrc = __uds_svc_secure_access(ctx, data, data_len,
-                                      res_data, &res_data_len);
+        nrc = __uds_svc_security_access(ctx, data, data_len,
+                                        res_data, &res_data_len);
         break;
 
     case UDS_SVC_CC:
-        break;
-
-    case UDS_SVC_RDBPI:
-        break;
-
-    case UDS_SVC_DDDI:
-        break;
-
-    case UDS_SVC_WDBI:
-        nrc = __uds_svc_write_data_by_identifier(ctx, data, data_len,
-                                                 res_data, &res_data_len);
-        break;
-
-    case UDS_SVC_IOCBI:
-        break;
-
-    case UDS_SVC_RC:
-        break;
-
-    case UDS_SVC_RU:
-        break;
-
-    case UDS_SVC_TD:
-        break;
-
-    case UDS_SVC_RTE:
-        break;
-
-    case UDS_SVC_RFT:
-        break;
-
-    case UDS_SVC_WMBA:
-        nrc = __uds_svc_write_memory_by_address(ctx, data, data_len,
-                                                res_data, &res_data_len);
         break;
 
     case UDS_SVC_TP:
@@ -1184,6 +1131,64 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
         break;
 
     case UDS_SVC_LC:
+        break;
+
+    /* Data Transmission */
+    case UDS_SVC_RDBI:
+        nrc = __uds_svc_read_data_by_identifier(ctx, data, data_len,
+                                                res_data, &res_data_len);
+        break;
+
+    case UDS_SVC_RMBA:
+        nrc = __uds_svc_read_memory_by_address(ctx, data, data_len,
+                                               res_data, &res_data_len);
+        break;
+
+    case UDS_SVC_RSDBI:
+        break;
+
+    case UDS_SVC_RDBPI:
+        break;
+
+    case UDS_SVC_DDDI:
+        break;
+
+    case UDS_SVC_WDBI:
+        nrc = __uds_svc_write_data_by_identifier(ctx, data, data_len,
+                                                 res_data, &res_data_len);
+        break;
+
+    case UDS_SVC_WMBA:
+        nrc = __uds_svc_write_memory_by_address(ctx, data, data_len,
+                                                res_data, &res_data_len);
+        break;
+
+    /* Stored Data Transmission */
+    case UDS_SVC_CDTCI:
+        break;
+
+    case UDS_SVC_RDTCI:
+        break;
+
+    /* InputOutput Control */
+    case UDS_SVC_IOCBI:
+        break;
+
+    /* Routine */
+    case UDS_SVC_RC:
+        break;
+
+    /* Upload Download */
+    case UDS_SVC_RU:
+        break;
+
+    case UDS_SVC_TD:
+        break;
+
+    case UDS_SVC_RTE:
+        break;
+
+    case UDS_SVC_RFT:
         break;
 
     default:
