@@ -201,7 +201,7 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
             else if (ctx->config->ecureset.cb_reset_hard(ctx->priv) != 0)
             {
                 uds_err(ctx, "cb_reset_hard failed\n");
-                nrc = UDS_NRC_CNC;
+                nrc = UDS_NRC_FPEORA;
             }
             else
             {
@@ -222,7 +222,7 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
             else if (ctx->config->ecureset.cb_reset_keyoffon(ctx->priv) != 0)
             {
                 uds_err(ctx, "cb_reset_keyoffon failed\n");
-                nrc = UDS_NRC_CNC;
+                nrc = UDS_NRC_FPEORA;
             }
             else
             {
@@ -243,7 +243,7 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
             else if (ctx->config->ecureset.cb_reset_soft(ctx->priv) != 0)
             {
                 uds_err(ctx, "cb_reset_soft failed\n");
-                nrc = UDS_NRC_CNC;
+                nrc = UDS_NRC_FPEORA;
             }
             else
             {
@@ -268,7 +268,7 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
             else if (ctx->config->ecureset.cb_enable_rps(ctx->priv, data[1]) != 0)
             {
                 uds_err(ctx, "cb_enable_rps failed\n");
-                nrc = UDS_NRC_CNC;
+                nrc = UDS_NRC_FPEORA;
             }
             else
             {
@@ -289,7 +289,7 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
             else if (ctx->config->ecureset.cb_disable_rps(ctx->priv) != 0)
             {
                 uds_err(ctx, "cb_enable_rps failed\n");
-                nrc = UDS_NRC_CNC;
+                nrc = UDS_NRC_FPEORA;
             }
             else
             {
@@ -311,7 +311,7 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
             else if (ctx->config->ecureset.cb_reset_vms(ctx->priv, reset_type) != 0)
             {
                 uds_err(ctx, "cb_reset_vms(0x%02X) failed\n", reset_type);
-                nrc = UDS_NRC_CNC;
+                nrc = UDS_NRC_FPEORA;
             }
             else
             {
@@ -333,7 +333,7 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
             else if (ctx->config->ecureset.cb_reset_sss(ctx->priv, reset_type) != 0)
             {
                 uds_err(ctx, "cb_reset_sss(0x%02X) failed\n", reset_type);
-                nrc = UDS_NRC_CNC;
+                nrc = UDS_NRC_FPEORA;
             }
             else
             {
@@ -436,7 +436,7 @@ static uint8_t __uds_svc_read_data_by_identifier(uds_context_t *ctx,
                         else if (0 != ret)
                         {
                             uds_err(ctx, "failed to read data with ID 0x%04X\n", identifier);
-                            nrc = UDS_NRC_CNC;
+                            nrc = UDS_NRC_FPEORA;
                         }
                         else
                         {
@@ -822,7 +822,7 @@ static uint8_t __uds_svc_secure_access(uds_context_t *ctx,
         }
         else if (0 == (ctx->current_session->sa_type_mask & UDS_CFG_SA_TYPE(sa_index)))
         {
-            nrc = UDS_NRC_CNC;
+            nrc = UDS_NRC_SFNSIAS;
         }
         else if (0 != __uds_secure_access_delay_timer_active(ctx))
         {
@@ -983,7 +983,7 @@ static uint8_t __uds_svc_control_dtc_settings(uds_context_t *ctx,
             else if (ctx->config->dtc_settings.cb_dtc_on(ctx->priv, extra_data, extra_data_len) != 0)
             {
                 uds_err(ctx, "cb_dtc_on failed\n");
-                nrc = UDS_NRC_CNC;
+                nrc = UDS_NRC_FPEORA;
             }
             else
             {
@@ -1004,7 +1004,7 @@ static uint8_t __uds_svc_control_dtc_settings(uds_context_t *ctx,
             else if (ctx->config->dtc_settings.cb_dtc_off(ctx->priv, extra_data, extra_data_len) != 0)
             {
                 uds_err(ctx, "cb_dtc_off failed\n");
-                nrc = UDS_NRC_CNC;
+                nrc = UDS_NRC_FPEORA;
             }
             else
             {
@@ -1027,7 +1027,7 @@ static uint8_t __uds_svc_control_dtc_settings(uds_context_t *ctx,
                                                                    extra_data, extra_data_len) != 0)
             {
                 uds_err(ctx, "cb_dtc_settings_vms(0x%02X) failed\n", dtc_setting_type);
-                nrc = UDS_NRC_CNC;
+                nrc = UDS_NRC_FPEORA;
             }
             else
             {
@@ -1050,7 +1050,7 @@ static uint8_t __uds_svc_control_dtc_settings(uds_context_t *ctx,
                                                                    extra_data, extra_data_len) != 0)
             {
                 uds_err(ctx, "cb_dtc_settings_sss(0x%02X) failed\n", dtc_setting_type);
-                nrc = UDS_NRC_CNC;
+                nrc = UDS_NRC_FPEORA;
             }
             else
             {
