@@ -872,8 +872,8 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
                                 nrc = UDS_NRC_PR;
                             }
                         }
-                    }
                     break;
+                    }
                 }
 
                 if (p == ctx->config->num_mem_regions)
@@ -946,8 +946,8 @@ static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
                         *res_data_len = 2;
                     }
                 }
-            }
             break;
+            }
         }
     }
 
@@ -1063,8 +1063,8 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
                                 nrc = UDS_NRC_PR;
                             }
                         }
-                    }
                     break;
+                    }
                 }
 
                 if (p == ctx->config->num_mem_regions)
@@ -1153,9 +1153,9 @@ static uint8_t __uds_svc_io_control_by_identifier(uds_context_t *ctx,
                         *res_data_len = out_data_len + 3;
                     }
                 }
-            }
             break;
         }
+    }
     }
 
     return nrc;
