@@ -12,6 +12,13 @@
 #define UDS_CFG_SESSION_MASK_ALL    (0xFFFFFFFFFFFFFFFF)
 #define UDS_CFG_SESSION_MASK(x)     (0x0000000000000001 << x)
 
+typedef enum {
+    UDS_IOCP_RETURN_CONTROL_TO_ECU = 0x00,
+    UDS_IOCP_RESET_TO_DEFAULT = 0x01,
+    UDS_IOCP_FREEZE_CURRENT_STATE = 0x02,
+    UDS_IOCP_SHORT_TERM_ADJUSTMENT = 0x03,
+} uds_iocp_e;
+
 typedef struct __uds_security_cfg
 {
     uint64_t standard_session_mask;
@@ -87,6 +94,11 @@ typedef struct __uds_config_data
     int (*cb_write)(void *priv, uint16_t identifier,
                     const uint8_t *data, const size_t data_len);
     uds_security_cfg_t sec_write;
+
+    int (*cb_io)(void *priv, uint16_t identifier, uds_iocp_e iocp,
+                 const uint8_t *in_data, const size_t in_data_len,
+                 uint8_t *out_data, size_t *out_data_len);
+    uds_security_cfg_t sec_io;
 } uds_config_data_t;
 
 typedef struct __uds_config_memory_region

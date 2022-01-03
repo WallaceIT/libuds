@@ -687,7 +687,7 @@ static uint8_t __uds_svc_read_data_by_identifier(uds_context_t *ctx,
         {
             identifier = (data[data_start] << 8) | (data[data_start + 1] << 0);
 
-            uds_debug(ctx, "requested to read data with ID 0x%04X\n", identifier);
+            uds_debug(ctx, "requested to read DID 0x%04X\n", identifier);
 
             for (d = 0; d < ctx->config->num_data_items; d++)
             {
@@ -695,23 +695,23 @@ static uint8_t __uds_svc_read_data_by_identifier(uds_context_t *ctx,
                 {
                     if (NULL == ctx->config->data_items[d].cb_read)
                     {
-                        uds_info(ctx, "cb_read not defined for data with ID 0x%04X\n",
+                        uds_info(ctx, "cb_read not defined for ID 0x%04X\n",
                                  identifier);
                     }
                     else if (__uds_session_check(ctx, &ctx->config->data_items[d].sec_read) != 0)
                     {
-                        uds_debug(ctx, "data with ID 0x%04X cannot be read in active session\n",
+                        uds_debug(ctx, "DID 0x%04X cannot be read in active session\n",
                                   identifier);
                     }
                     else if (__uds_security_check(ctx, &ctx->config->data_items[d].sec_read) != 0)
                     {
-                        uds_debug(ctx, "data with ID 0x%04X cannot be read with current SA\n",
+                        uds_debug(ctx, "DID 0x%04X cannot be read with current SA\n",
                                   identifier);
                         nrc = UDS_NRC_SAD;
                     }
                     else if ((res_data_used + 2) >= *res_data_len)
                     {
-                        uds_info(ctx, "no space for identifier and data for ID 0x%04X\n",
+                        uds_info(ctx, "no space for identifier and data for DID 0x%04X\n",
                                  identifier);
                         nrc = UDS_NRC_RTL;
                     }
@@ -726,17 +726,17 @@ static uint8_t __uds_svc_read_data_by_identifier(uds_context_t *ctx,
                                                                  &res_data_item_len);
                         if ((res_data_used + res_data_item_len) > *res_data_len)
                         {
-                            uds_info(ctx, "no space for data with ID 0x%04X\n", identifier);
+                            uds_info(ctx, "no space for data for DID 0x%04X\n", identifier);
                             nrc = UDS_NRC_RTL;
                         }
                         else if (0 != ret)
                         {
-                            uds_err(ctx, "failed to read data with ID 0x%04X\n", identifier);
+                            uds_err(ctx, "failed to read DID 0x%04X\n", identifier);
                             nrc = UDS_NRC_FPEORA;
                         }
                         else
                         {
-                            uds_debug(ctx, "data with ID 0x%04X read successfully (len = %lu)\n",
+                            uds_debug(ctx, "DID 0x%04X read successfully (len = %lu)\n",
                                       identifier, res_data_item_len);
                             res_data_used += res_data_item_len;
                         }
@@ -905,7 +905,7 @@ static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
     {
         identifier = (data[0] << 8) | (data[1] << 0);
 
-        uds_debug(ctx, "requested to write data with ID 0x%04X\n", identifier);
+        uds_debug(ctx, "requested to write DID 0x%04X\n", identifier);
 
         for (d = 0; d < ctx->config->num_data_items; d++)
         {
@@ -913,19 +913,19 @@ static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
             {
                 if (NULL == ctx->config->data_items[d].cb_write)
                 {
-                    uds_info(ctx, "cb_write not defined for data with ID 0x%04X\n",
+                    uds_info(ctx, "cb_write not defined for DID 0x%04X\n",
                                 identifier);
                     nrc = UDS_NRC_ROOR;
                 }
                 else if (__uds_session_check(ctx, &ctx->config->data_items[d].sec_write) != 0)
                 {
-                    uds_debug(ctx, "data with ID 0x%04X cannot be written in active session\n",
+                    uds_debug(ctx, "DID 0x%04X cannot be written in active session\n",
                               identifier);
                     nrc = UDS_NRC_ROOR;
                 }
                 else if (__uds_security_check(ctx, &ctx->config->data_items[d].sec_write) != 0)
                 {
-                    uds_debug(ctx, "data with ID 0x%04X cannot be written with current SA\n",
+                    uds_debug(ctx, "DID 0x%04X cannot be written with current SA\n",
                               identifier);
                     nrc = UDS_NRC_SAD;
                 }
@@ -935,7 +935,7 @@ static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
                                                               &data[2], (data_len - 2));
                     if (ret != 0)
                     {
-                        uds_err(ctx, "failed to write data with ID 0x%04X\n", identifier);
+                        uds_err(ctx, "failed to write DID 0x%04X\n", identifier);
                         nrc = UDS_NRC_GPF;
                     }
                     else
@@ -1079,6 +1079,88 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
     return nrc;
 }
 
+static uint8_t __uds_svc_io_control_by_identifier(uds_context_t *ctx,
+                                                  const uint8_t *data, size_t data_len,
+                                                  uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint16_t identifier = __UDS_INVALID_DATA_IDENTIFIER;
+    uint8_t iocp = 0xFF;
+    const uint8_t *control_data = NULL;
+    uint8_t *out_data = NULL;
+    size_t out_data_len = 0;
+    unsigned long d = 0;
+    int ret = 0;
+
+    if (data_len < 3)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        identifier = (data[0] << 8) | (data[1] << 0);
+        iocp = data[2];
+
+        uds_debug(ctx, "requested IO control with DID 0x%04X\n", identifier);
+
+        for (d = 0; d < ctx->config->num_data_items; d++)
+        {
+            if (ctx->config->data_items[d].identifier == identifier)
+            {
+                if (NULL == ctx->config->data_items[d].cb_io)
+                {
+                    uds_info(ctx, "cb_io not defined for DID 0x%04X\n", identifier);
+                    nrc = UDS_NRC_ROOR;
+                }
+                else if (__uds_session_check(ctx, &ctx->config->data_items[d].sec_io) != 0)
+                {
+                    uds_debug(ctx, "IO control on DID 0x%04X non supported in active session\n",
+                              identifier);
+                    nrc = UDS_NRC_ROOR;
+                }
+                else if ((iocp == UDS_IOCP_STA) && data_len < 4)
+                {
+                    // For Short Term Adjustment, the standard requires at least one controlState byte
+                    nrc = UDS_NRC_IMLOIF;
+                }
+                else if (__uds_security_check(ctx, &ctx->config->data_items[d].sec_write) != 0)
+                {
+                    uds_debug(ctx, "I/O control on DID 0x%04X not allowed with current SA\n",
+                              identifier);
+                    nrc = UDS_NRC_SAD;
+                }
+                else
+                {
+                    if (data_len > 3)
+                    {
+                        control_data = &data[3];
+                    }
+                    out_data = &res_data[3];
+                    out_data_len = *res_data_len - 3;
+                    ret = ctx->config->data_items[d].cb_io(ctx->priv, identifier, iocp,
+                                                           control_data, (data_len - 3),
+                                                           out_data, &out_data_len);
+                    if (ret != 0)
+                    {
+                        uds_err(ctx, "failed to perform IO control on DID 0x%04X\n",
+                                identifier);
+                        nrc = UDS_NRC_FPEORA;
+                    }
+                    else
+                    {
+                        nrc = UDS_NRC_PR;
+                        memcpy(res_data, data, 3);
+                        *res_data_len = out_data_len + 3;
+                    }
+                }
+            }
+            break;
+        }
+    }
+
+    return nrc;
+}
+
 static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
                               const uint8_t *data, size_t data_len,
                               const uds_address_e addr_type)
@@ -1172,6 +1254,8 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
 
     /* InputOutput Control */
     case UDS_SVC_IOCBI:
+        nrc = __uds_svc_io_control_by_identifier(ctx, data, data_len,
+                                                 res_data, &res_data_len);
         break;
 
     /* Routine */

@@ -107,6 +107,12 @@
 #define UDS_LEV_CTRLTP_ERXDTXWEAI   0x04 // Enable Rx And Disable TX With Enhanced Address Information
 #define UDS_LEV_CTRLTP_ERXTXWEAI    0x05 // Enable Rx And TX With Enhanced Address Information
 
+// InputOutput Control Parameter (parameter of UDS_SVC_IOCBI)
+#define UDS_IOCP_RCTECU         0x00 // Return Control To ECU
+#define UDS_IOCP_RTD            0x01 // Reset To Default
+#define UDS_IOCP_FCS            0x02 // Freeze Current State
+#define UDS_IOCP_STA            0x03 // Short Term Adjustment
+
 // Timing parameter access types (sub-functions of UDS_SVC_ATP)
 #define UDS_LEV_TPAT_RETPS      0x01 // Read Extended Timing Parameter Set
 #define UDS_LEV_TPAT_STPTDV     0x02 // Set Timing Parameters To Default Values
