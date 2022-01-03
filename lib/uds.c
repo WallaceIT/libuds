@@ -121,7 +121,7 @@ static uint8_t __uds_svc_session_control(uds_context_t *ctx,
                                          const uint8_t *data, size_t data_len,
                                          uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_PR;
+    uint8_t nrc = UDS_NRC_GR;
     uint8_t requested_session = 0x00;
     unsigned int s = 0;
 
@@ -176,7 +176,7 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
                                    const uint8_t *data, size_t data_len,
                                    uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_SFNS;
+    uint8_t nrc = UDS_NRC_GR;
     uint8_t reset_type = 0;
 
     if (1 != data_len)
@@ -372,7 +372,7 @@ static uint8_t __uds_svc_security_access(uds_context_t *ctx,
                                          const uint8_t *data, size_t data_len,
                                          uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_SFNS;
+    uint8_t nrc = UDS_NRC_GR;
     uint8_t sr = 0x00;
     uint8_t sa_index = __UDS_INVALID_SA_INDEX;
     const uint8_t *in_data = NULL;
@@ -501,7 +501,7 @@ static uint8_t __uds_svc_tester_present(uds_context_t *ctx,
                                         const uint8_t *data, size_t data_len,
                                         uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_SPRMINB;
+    uint8_t nrc = UDS_NRC_GR;
 
     if (1 != data_len)
     {
@@ -529,7 +529,7 @@ static uint8_t __uds_svc_control_dtc_settings(uds_context_t *ctx,
                                               const uint8_t *data, size_t data_len,
                                               uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_PR;
+    uint8_t nrc = UDS_NRC_GR;
     uint8_t dtc_setting_type = 0xFF;
     const uint8_t *extra_data = NULL;
     size_t extra_data_len = 0;
@@ -662,7 +662,7 @@ static uint8_t __uds_svc_read_data_by_identifier(uds_context_t *ctx,
                                                  const uint8_t *data, size_t data_len,
                                                  uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_ROOR;
+    uint8_t nrc = UDS_NRC_GR;
     uint16_t identifier = __UDS_INVALID_DATA_IDENTIFIER;
     size_t data_start = 0;
     size_t res_data_used = 0;
@@ -773,7 +773,7 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
                                                 const uint8_t *data, size_t data_len,
                                                 uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_SNS;
+    uint8_t nrc = UDS_NRC_GR;
     uint8_t addr_len = 0;
     uint8_t size_len = 0;
     void * addr = 0;
@@ -892,7 +892,7 @@ static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
                                                   const uint8_t *data, size_t data_len,
                                                   uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_ROOR;
+    uint8_t nrc = UDS_NRC_GR;
     uint16_t identifier = __UDS_INVALID_DATA_IDENTIFIER;
     unsigned long d = 0;
     int ret = -1;
@@ -958,7 +958,7 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
                                                  const uint8_t *data, size_t data_len,
                                                  uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_SNS;
+    uint8_t nrc = UDS_NRC_GR;
     uint8_t addr_len = 0;
     uint8_t size_len = 0;
     void * addr = 0;
