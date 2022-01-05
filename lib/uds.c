@@ -14,6 +14,7 @@
 
 #define __UDS_INVALID_SA_INDEX 0xFF
 #define __UDS_INVALID_DATA_IDENTIFIER 0xFFFF
+#define __UDS_INVALID_GROUP_OF_DTC 0x00000000
 
 static const uds_session_cfg_t __uds_default_session =
 {
@@ -872,7 +873,7 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
                                 nrc = UDS_NRC_PR;
                             }
                         }
-                    break;
+                        break;
                     }
                 }
 
@@ -946,7 +947,7 @@ static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
                         *res_data_len = 2;
                     }
                 }
-            break;
+                break;
             }
         }
     }
@@ -1063,7 +1064,7 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
                                 nrc = UDS_NRC_PR;
                             }
                         }
-                    break;
+                        break;
                     }
                 }
 
@@ -1153,9 +1154,652 @@ static uint8_t __uds_svc_io_control_by_identifier(uds_context_t *ctx,
                         *res_data_len = out_data_len + 3;
                     }
                 }
+                break;
+            }
+        }
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_svc_clear_diagnostic_information(uds_context_t *ctx,
+                                                      const uint8_t *data, size_t data_len,
+                                                      uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint32_t godtc = __UDS_INVALID_GROUP_OF_DTC;
+    unsigned int d = 0;
+
+    if (data_len != 4)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        godtc = ((0x0000FFU & data[0]) << 16) |
+                ((0x0000FFU & data[1]) <<  8) |
+                ((0x0000FFU & data[2]) <<  0);
+
+        uds_debug(ctx, "requested clear of diagnostic data for GODTC 0x%06X\n", godtc);
+
+        for (d = 0; d < ctx->config->num_groups_of_dtc; d++)
+        {
+            if ((godtc == ctx->config->groups_of_dtc[d].first) ||
+                ((godtc >= ctx->config->groups_of_dtc[d].first) &&
+                 (godtc <= ctx->config->groups_of_dtc[d].last)))
+            {
+                if (__uds_session_check(ctx, &ctx->config->groups_of_dtc[d].sec) != 0)
+                {
+                    uds_debug(ctx, "cannot clear GODTC 0x%06X in active session\n",
+                              godtc);
+                    nrc = UDS_NRC_ROOR;
+                }
+                else if (NULL == ctx->config->groups_of_dtc[d].cb_clear)
+                {
+                    uds_info(ctx, "cb_clear not defined for GODTC 0x%06X\n", godtc);
+                    nrc = UDS_NRC_ROOR;
+                }
+                else if (ctx->config->groups_of_dtc[d].cb_clear(ctx->priv, godtc) != 0)
+                {
+                    uds_err(ctx, "failed to clear diagnostic data for GODTC 0x%06X\n",
+                            godtc);
+                        nrc = UDS_NRC_GPF;
+                }
+                else
+                {
+                    nrc = UDS_NRC_PR;
+                }
+                break;
+            }
+        }
+
+        if (d == ctx->config->num_groups_of_dtc)
+        {
+            nrc = UDS_NRC_ROOR;
+        }
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_rdtci_report_number_of_dtc_by_status_mask(uds_context_t *ctx,
+                                                               const uint8_t *data, size_t data_len,
+                                                               uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint8_t status_mask = 0x00;
+    uint8_t dtc_status_mask = 0x00;
+    uint16_t number_of_dtc = 0;
+    uint32_t dtc_number = 0;
+    unsigned long d = 0;
+    int ret = 0;
+
+    if (data_len < 1)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else if (NULL == ctx->config->dtc_information.cb_get_dtc_status_mask)
+    {
+        uds_debug(ctx, "cb_get_dtc_status_mask not defined\n");
+        nrc = UDS_NRC_SFNS;
+    }
+    else
+    {
+        status_mask = data[0];
+        for (d = 0; d < ctx->config->dtc_information.number_of_dtcs; d++)
+        {
+            dtc_number = ctx->config->dtc_information.dtcs[d].dtc_number;
+            ret = ctx->config->dtc_information.cb_get_dtc_status_mask(ctx->priv, dtc_number,
+                                                                      &dtc_status_mask);
+            if (ret != 0)
+            {
+                uds_err(ctx, "failed to read status of DTC 0x%06X\n", dtc_number);
+            }
+            else if ((dtc_status_mask & status_mask) != 0)
+            {
+                number_of_dtc++;
+            }
+        }
+
+        nrc = UDS_NRC_PR;
+        res_data[0] = status_mask;
+        res_data[1] = ctx->config->dtc_information.format_identifier;
+        res_data[2] = (number_of_dtc >> 8) & 0xFF;
+        res_data[3] = (number_of_dtc >> 0) & 0xFF;
+        *res_data_len = 4;
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_rdtci_report_dtc_by_status_mask(uds_context_t *ctx,
+                                                     const uint8_t *data, size_t data_len,
+                                                     uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint8_t status_mask = 0x00;
+    uint8_t dtc_status_mask = 0x00;
+    uint32_t dtc_number = 0;
+    uint8_t dtc_status = 0;
+    uint8_t *dtc_data = NULL;
+    unsigned int d = 0;
+    int ret = 0;
+
+    if (data_len < 1)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else if (NULL == ctx->config->dtc_information.cb_get_dtc_status_mask)
+    {
+        uds_debug(ctx, "cb_get_dtc_status_mask not defined\n");
+        nrc = UDS_NRC_SFNS;
+    }
+    else
+    {
+        status_mask = data[0];
+
+        dtc_data = &res_data[1];
+
+        for (d = 0; d < ctx->config->dtc_information.number_of_dtcs; d++)
+        {
+            dtc_number = (ctx->config->dtc_information.dtcs[d].dtc_number & 0xFFFFFF);
+            ret = ctx->config->dtc_information.cb_get_dtc_status_mask(ctx->priv, dtc_number,
+                                                                      &dtc_status_mask);
+            if (ret != 0)
+            {
+                uds_err(ctx, "failed to read status of DTC 0x%06X\n", dtc_number);
+            }
+            else if ((dtc_status_mask & status_mask) != 0)
+            {
+                dtc_data[0] = (dtc_number >> 16) & 0xFF;
+                dtc_data[1] = (dtc_number >>  8) & 0xFF;
+                dtc_data[2] = (dtc_number >>  0) & 0xFF;
+                dtc_data[3] = dtc_status;
+                dtc_data += 4;
+            }
+        }
+
+        nrc = UDS_NRC_PR;
+        res_data[0] = status_mask;
+        *res_data_len = 1 + (dtc_data - &res_data[1]);
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_rdtci_report_dtc_snapshot_identification(uds_context_t *ctx,
+                                                              const uint8_t *data, size_t data_len,
+                                                              uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint8_t *out_data = res_data;
+    uint32_t dtc_number = 0;
+    unsigned long d = 0;
+    unsigned long r = 0;
+
+    if (NULL == ctx->config->dtc_information.cb_is_dtc_snapshot_record_available)
+    {
+        uds_debug(ctx, "cb_is_dtc_snapshot_record_available not defined\n");
+        nrc = UDS_NRC_SFNS;
+    }
+    else
+    {
+        for (d = 0; d < ctx->config->dtc_information.number_of_dtcs; d++)
+        {
+            dtc_number = ctx->config->dtc_information.dtcs[d].dtc_number;
+            for (r = 0; r < 0xFF; r++)
+            {
+                if (((out_data - res_data) + 4) > *res_data_len)
+                {
+                    break;
+                }
+
+                if (ctx->config->dtc_information.cb_is_dtc_snapshot_record_available(ctx->priv, dtc_number, r) != 0)
+                {
+                    out_data[0] = (dtc_number >> 16) & 0xFF;
+                    out_data[1] = (dtc_number >>  8) & 0xFF;
+                    out_data[2] = (dtc_number >>  0) & 0xFF;
+                    out_data[3] = r;
+                    out_data += 4;
+                }
+            }
+        }
+
+        nrc = UDS_NRC_PR;
+        *res_data_len = (out_data - res_data);
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_rdtci_report_dtc_snapshot_record(uds_context_t *ctx,
+                                                      const uint8_t *data, size_t data_len,
+                                                      uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint32_t dtc_number = 0;
+    uint8_t record_number = 0xFF;
+    uint8_t dtc_status = 0x00;
+    uint8_t *record_data = NULL;
+    size_t record_data_len = 0;
+    size_t used_data_len = 0;
+    uint8_t record_start = 0;
+    uint8_t record_stop = 0;
+    unsigned long d = 0;
+    uint8_t r = 0;
+    int ret = 0;
+
+    if (data_len < 4)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else if (NULL == ctx->config->dtc_information.cb_get_dtc_snapshot_record)
+    {
+        uds_debug(ctx, "cb_get_dtc_snapshot_record not defined\n");
+        nrc = UDS_NRC_SFNS;
+    }
+    else if (NULL == ctx->config->dtc_information.cb_get_dtc_status_mask)
+    {
+        uds_debug(ctx, "cb_get_dtc_status_mask not defined\n");
+        nrc = UDS_NRC_SFNS;
+    }
+    else
+    {
+        dtc_number = ((0x0000FFU & data[0]) << 16) |
+                     ((0x0000FFU & data[1]) <<  8) |
+                     ((0x0000FFU & data[2]) <<  0);
+        record_number = data[3];
+
+        // Check if dtc_number is valid
+        nrc = UDS_NRC_ROOR;
+        for (d = 0; d < ctx->config->dtc_information.number_of_dtcs; d++)
+        {
+            if (ctx->config->dtc_information.dtcs[d].dtc_number == dtc_number)
+            {
+                if (0xFF == record_number)
+                {
+                    record_start = 0;
+                    record_stop = 0xFE;
+                }
+                else
+                {
+                    record_start = record_number;
+                    record_stop = record_number;
+                }
+                nrc = UDS_NRC_PR;
+                break;
+            }
+        }
+
+        if (UDS_NRC_PR == nrc)
+        {
+            ret = ctx->config->dtc_information.cb_get_dtc_status_mask(ctx->priv, dtc_number,
+                                                                      &dtc_status);
+            if (ret != 0)
+            {
+                uds_err(ctx, "failed to read DTC status mask for DTC 0x%06X\n", dtc_number);
+                nrc = UDS_NRC_GR;
+            }
+            else
+            {
+                res_data[0] = (dtc_number >> 16) & 0xFF;
+                res_data[1] = (dtc_number >>  8) & 0xFF;
+                res_data[2] = (dtc_number >>  0) & 0xFF;
+                res_data[3] = dtc_status;
+
+                used_data_len = 4;
+
+                for (r = record_start; r < record_stop; r++)
+                {
+                    if ((used_data_len + 1) >= *res_data_len)
+                    {
+                        break;
+                    }
+                    record_data = &res_data[used_data_len + 1];
+                    record_data_len = used_data_len - 1;
+                    ret = ctx->config->dtc_information.cb_get_dtc_snapshot_record(ctx->priv, dtc_number, r,
+                                                                                  record_data, &record_data_len);
+                    if ((ret != 0) && (record_start == record_stop))
+                    {
+                        uds_err(ctx, "failed to read snapshot record 0x%02X for DTC 0x%06X\n",
+                                r, dtc_number);
+                        nrc = UDS_NRC_ROOR;
+                        break;
+                    }
+                    else if ((ret == 0) && (record_data_len > 0))
+                    {
+                        res_data[used_data_len] = r;
+                        used_data_len += (record_data_len + 1);
+                    }
+                }
+                *res_data_len = used_data_len;
+            }
+        }
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_rdtci_report_dtc_stored_data(uds_context_t *ctx,
+                                                  const uint8_t *data, size_t data_len,
+                                                  uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint8_t record_number = 0xFF;
+    uint8_t *record_data = NULL;
+    size_t record_data_len = 0;
+    size_t used_data_len = 0;
+    uint8_t record_start = 0;
+    uint8_t record_stop = 0;
+    uint8_t r = 0;
+    int ret = 0;
+
+    if (data_len < 1)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else if (NULL == ctx->config->dtc_information.cb_get_stored_data_record)
+    {
+        uds_debug(ctx, "cb_get_stored_data_record not defined\n");
+        nrc = UDS_NRC_SFNS;
+    }
+    else
+    {
+        record_number = data[0];
+
+        if (0xFF == record_number)
+        {
+            record_start = 0;
+            record_stop = 0xFE;
+        }
+        else
+        {
+            record_start = record_number;
+            record_stop = record_number;
+        }
+
+        used_data_len = 0;
+
+        for (r = record_start; r < record_stop; r++)
+        {
+            if ((used_data_len + 1) >= *res_data_len)
+            {
+                break;
+            }
+            record_data = &res_data[used_data_len + 1];
+            record_data_len = used_data_len - 1;
+            ret = ctx->config->dtc_information.cb_get_stored_data_record(ctx->priv, r,
+                                                                         record_data, &record_data_len);
+            if ((ret != 0) && (record_start == record_stop))
+            {
+                uds_err(ctx, "failed to read stored data record 0x%02X\n", r);
+                nrc = UDS_NRC_ROOR;
+                break;
+            }
+            else if ((ret == 0) && (record_data_len > 0))
+            {
+                res_data[used_data_len] = r;
+                used_data_len += (record_data_len + 1);
+            }
+        }
+        *res_data_len = used_data_len;
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_rdtci_report_dtc_extended_data(uds_context_t *ctx,
+                                                    const uint8_t *data, size_t data_len,
+                                                    uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint32_t dtc_number = 0;
+    uint8_t record_number = 0xFF;
+    uint8_t dtc_status = 0x00;
+    uint8_t *record_data = NULL;
+    size_t record_data_len = 0;
+    size_t used_data_len = 0;
+    uint8_t record_start = 0;
+    uint8_t record_stop = 0;
+    unsigned long d = 0;
+    uint8_t r = 0;
+    int ret = 0;
+
+    if (data_len < 4)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else if (NULL == ctx->config->dtc_information.cb_get_dtc_extended_data_record)
+    {
+        uds_debug(ctx, "cb_get_dtc_extended_data_record not defined\n");
+        nrc = UDS_NRC_SFNS;
+    }
+    else if (NULL == ctx->config->dtc_information.cb_get_dtc_status_mask)
+    {
+        uds_debug(ctx, "cb_get_dtc_status_mask not defined\n");
+        nrc = UDS_NRC_SFNS;
+    }
+    else
+    {
+        dtc_number = ((0x0000FFU & data[0]) << 16) |
+                     ((0x0000FFU & data[1]) <<  8) |
+                     ((0x0000FFU & data[2]) <<  0);
+        record_number = data[3];
+
+        // Check if dtc_number is valid
+        nrc = UDS_NRC_ROOR;
+        for (d = 0; d < ctx->config->dtc_information.number_of_dtcs; d++)
+        {
+            if (ctx->config->dtc_information.dtcs[d].dtc_number == dtc_number)
+            {
+                if (0xFE == record_number)
+                {
+                    // OBD extended data records
+                    record_start = 0x90;
+                    record_stop = 0xEF;
+                    
+                }
+                else if (0xFF == record_number)
+                {
+                    record_start = 0;
+                    record_stop = 0xFD;
+                }
+                else
+                {
+                    record_start = record_number;
+                    record_stop = record_number;
+                }
+                nrc = UDS_NRC_PR;
+                break;
+            }
+        }
+
+        if (UDS_NRC_PR == nrc)
+        {
+            ret = ctx->config->dtc_information.cb_get_dtc_status_mask(ctx->priv, dtc_number,
+                                                                      &dtc_status);
+            if (ret != 0)
+            {
+                uds_err(ctx, "failed to read DTC status mask for DTC 0x%06X\n", dtc_number);
+                nrc = UDS_NRC_GR;
+            }
+            else
+            {
+                res_data[0] = (dtc_number >> 16) & 0xFF;
+                res_data[1] = (dtc_number >>  8) & 0xFF;
+                res_data[2] = (dtc_number >>  0) & 0xFF;
+                res_data[3] = dtc_status;
+
+                used_data_len = 4;
+
+                for (r = record_start; r < record_stop; r++)
+                {
+                    if ((used_data_len + 1) >= *res_data_len)
+                    {
+                        break;
+                    }
+                    record_data = &res_data[used_data_len + 1];
+                    record_data_len = used_data_len - 1;
+                    ret = ctx->config->dtc_information.cb_get_dtc_extended_data_record(ctx->priv, dtc_number, r,
+                                                                                       record_data, &record_data_len);
+                    if ((ret != 0) && (record_start == record_stop))
+                    {
+                        uds_err(ctx, "failed to read extended data record 0x%02X for DTC 0x%06X\n",
+                                r, dtc_number);
+                        nrc = UDS_NRC_ROOR;
+                        break;
+                    }
+                    else if ((ret == 0) && (record_data_len > 0))
+                    {
+                        res_data[used_data_len] = r;
+                        used_data_len += (record_data_len + 1);
+                    }
+                }
+                *res_data_len = used_data_len;
+            }
+        }
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_svc_read_dtc_information(uds_context_t *ctx,
+                                              const uint8_t *data, size_t data_len,
+                                              uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint8_t report_type = 0x00;
+
+    const uint8_t *in_data = NULL;
+    size_t in_data_len = 0;
+
+    uint8_t *out_data = NULL;
+    size_t out_data_len = 0;
+
+    if (data_len < 1)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        report_type = __UDS_GET_SUBFUNCTION(data[0]);
+
+        in_data_len = (data_len - 1);
+        if (in_data_len > 0)
+        {
+            in_data = &data[1];
+        }
+
+        out_data_len = (*res_data_len - 1);
+        out_data = &res_data[1];
+
+        uds_debug(ctx, "read DTC information with reportType 0x%02X\n", report_type);
+
+        switch (report_type)
+        {
+        case UDS_LEV_RNODTCBSM:
+            nrc = __uds_rdtci_report_number_of_dtc_by_status_mask(ctx, in_data, in_data_len,
+                                                                  out_data, &out_data_len);
+            break;
+
+        case UDS_LEV_RDTCBSM:
+            nrc = __uds_rdtci_report_dtc_by_status_mask(ctx, in_data, in_data_len,
+                                                        out_data, &out_data_len);
+            break;
+
+        case UDS_LEV_RDTCSSI:
+            nrc = __uds_rdtci_report_dtc_snapshot_identification(ctx, in_data, in_data_len,
+                                                                 out_data, &out_data_len);
+            break;
+
+        case UDS_LEV_RDTCSSBDTC:
+            nrc = __uds_rdtci_report_dtc_snapshot_record(ctx, in_data, in_data_len,
+                                                         out_data, &out_data_len);
+            break;
+
+        case UDS_LEV_RDTCSDBRN:
+            nrc = __uds_rdtci_report_dtc_stored_data(ctx, in_data, in_data_len,
+                                                     out_data, &out_data_len);
+            break;
+
+        case UDS_LEV_RDTCEDRBDN:
+            nrc = __uds_rdtci_report_dtc_extended_data(ctx, in_data, in_data_len,
+                                                       out_data, &out_data_len);
+            break;
+
+        case UDS_LEV_RNODTCBSMR:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RDTCBSMR:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RSIODTC:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RSUPDTC:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RFTFDTC:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RFCDTC:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RMRTFDTC:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RMRCDTC:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RMMDTCBSM:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RMDEDRBDN:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RNOMMDTCBSM:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RNOOEBDDTCBSM:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_ROBDDTCBSM:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RDTCFDC:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RDTCWPS:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RDTCEDRBR:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RUDMDTCBSM:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RUDMDTCSSBDTC:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RUDMDTCEDRBDN:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_ROBDDTCBMR:
+            nrc = UDS_NRC_SFNS;
+            break;
+        case UDS_LEV_RWWHOBDDTCWPS:
+            nrc = UDS_NRC_SFNS;
+            break;
+        default:
+            nrc = UDS_NRC_SFNS;
             break;
         }
     }
+
+    if (UDS_NRC_PR == nrc)
+    {
+        res_data[0] = report_type;
+        *res_data_len = (out_data_len + 1);
     }
 
     return nrc;
@@ -1247,9 +1891,13 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
 
     /* Stored Data Transmission */
     case UDS_SVC_CDTCI:
+        nrc = __uds_svc_clear_diagnostic_information(ctx, data, data_len,
+                                                     res_data, &res_data_len);
         break;
 
     case UDS_SVC_RDTCI:
+        nrc = __uds_svc_read_dtc_information(ctx, data, data_len,
+                                             res_data, &res_data_len);
         break;
 
     /* InputOutput Control */

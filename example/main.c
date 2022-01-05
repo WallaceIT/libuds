@@ -405,6 +405,11 @@ static const uds_config_t uds_config =
 
     .data_items = data_items,
     .num_data_items = sizeof(data_items) / sizeof(uds_config_data_t),
+
+    .dtc_information =
+    {
+        .format_identifier = UDS_DTC_FORMAT_ISO_14229_1,
+    },
 };
 
 int main(int argc, char *argv[])
