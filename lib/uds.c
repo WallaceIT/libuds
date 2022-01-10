@@ -18,7 +18,7 @@
 
 static const uds_session_cfg_t __uds_default_session =
 {
-    .session_type = 0x00,
+    .session_type = 0x01,
     .sa_type_mask = 0UL,
 };
 
@@ -30,12 +30,9 @@ static inline uint8_t __uds_sat_to_sa_index(const uint8_t sat)
 static void __uds_reset_to_default_session(uds_context_t *ctx)
 {
     unsigned int s = 0;
-
-    uds_info(ctx, "resetting session to default\n");
-
     for (s = 0; s < ctx->config->num_session_config; s++)
     {
-        if (ctx->config->session_config[s].session_type == 0x00)
+        if (ctx->config->session_config[s].session_type == 0x01)
         {
             ctx->current_session = &ctx->config->session_config[s];
             break;
@@ -48,13 +45,37 @@ static void __uds_reset_to_default_session(uds_context_t *ctx)
     }
 }
 
+static void __uds_reset_secure_access(uds_context_t *ctx)
+{
+    ctx->current_sa = NULL;
+}
+
+static inline int __uds_sa_vs_session_check(uds_context_t *ctx,
+                                            const uds_sa_cfg_t *sa_config,
+                                            const uds_session_cfg_t *session_config)
+{
+    int ret = -1;
+
+    uds_debug(ctx, "sa_vs_session_check with sa = %d and session = 0x%02X\n",
+              ((NULL != sa_config) ? sa_config->sa_index : -1),
+              ((NULL != session_config) ? session_config->session_type : 0xFF));
+
+    if ((NULL != sa_config) && (NULL != session_config) &&
+        ((UDS_CFG_SA_TYPE(sa_config->sa_index) & session_config->sa_type_mask) != 0))
+    {
+        ret = 0;
+    }
+
+    return ret;
+}
+
 static inline int __uds_session_check(uds_context_t *ctx, const uds_security_cfg_t* cfg)
 {
     int ret = -1;
 
     uds_debug(ctx, "session_check with active session = 0x%02X\n",
               ctx->current_session->session_type);
-    uds_debug(ctx, "standars_sm = 0x%016lX\n", cfg->standard_session_mask);
+    uds_debug(ctx, "standard_sm = 0x%016lX\n", cfg->standard_session_mask);
     uds_debug(ctx, "specific_sm = 0x%016lX\n", cfg->specific_session_mask);
 
     if ((ctx->current_session->session_type < 64) &&
@@ -138,13 +159,14 @@ static uint8_t __uds_svc_session_control(uds_context_t *ctx,
             if (ctx->config->session_config[s].session_type == requested_session)
             {
                 uds_info(ctx, "entering session 0x%02X\n", requested_session);
-                ctx->current_session = &ctx->config->session_config[s];
 
-                if ((NULL != ctx->current_sa) &&
-                    ((UDS_CFG_SA_TYPE(ctx->current_sa->sa_index) & ctx->config->session_config[s].sa_type_mask) == 0))
+                if (__uds_sa_vs_session_check(ctx, ctx->current_sa, &ctx->config->session_config[s]) != 0)
                 {
-                    ctx->current_sa = NULL;
+                    uds_info(ctx, "secure access not allowed in new session, reset it\n");
+                    __uds_reset_secure_access(ctx);
                 }
+
+                ctx->current_session = &ctx->config->session_config[s];
                 break;
             }
         }
@@ -480,6 +502,7 @@ static uint8_t __uds_svc_security_access(uds_context_t *ctx,
                         {
                             res_data[0] = sr;
                             *res_data_len = 1;
+                            uds_debug(ctx, "activating SA 0x%02X\n", sa_index);
                             ctx->current_sa = &ctx->config->sa_config[l];
                             ctx->current_sa_seed = __UDS_INVALID_SA_INDEX;
                             nrc = UDS_NRC_PR;
@@ -1995,6 +2018,21 @@ static int __uds_init(uds_context_t *ctx, const uds_config_t *config,
     return ret;
 }
 
+static long int timespec_elapsed_ms(const struct timespec *stop,
+                                    const struct timespec *start)
+{
+    long int ret = 0;
+
+    if ((stop->tv_sec > start->tv_sec) ||
+        ((stop->tv_sec == start->tv_sec) && (stop->tv_nsec >= start->tv_sec)))
+    {
+        ret = 1000L * (stop->tv_sec - start->tv_sec);
+        ret += (stop->tv_nsec - start->tv_nsec + 500000L) / 1000000L;
+    }
+
+    return ret;
+}
+
 int uds_init(uds_context_t *ctx, const uds_config_t *config,
              uint8_t *response_buffer, size_t response_buffer_len, void *priv)
 {
@@ -2044,7 +2082,8 @@ void uds_deinit(uds_context_t *ctx)
 }
 
 int uds_receive(uds_context_t *ctx, uds_address_e addr_type,
-                const uint8_t *data, const size_t len)
+                const uint8_t *data, const size_t len,
+                const struct timespec *timestamp)
 {
     uint8_t service = 0x00;
     const uint8_t *payload = NULL;
@@ -2077,10 +2116,34 @@ int uds_receive(uds_context_t *ctx, uds_address_e addr_type,
         ret = __uds_process_service(ctx, service, payload, payload_len, addr_type);
     }
 
+    // Update last contact timestamp
+    if (NULL != timestamp)
+    {
+        memcpy(&ctx->timestamp, timestamp, sizeof(ctx->timestamp));
+    }
+
     return ret;
 }
 
-int uds_cycle(uds_context_t *ctx)
+int uds_cycle(uds_context_t *ctx, const struct timespec *timestamp)
 {
+    long int elapsed_ms = 0;
+
+    elapsed_ms = timespec_elapsed_ms(timestamp, &ctx->timestamp);
+    if ((elapsed_ms > 0) &&
+        (NULL != ctx->current_session) && (ctx->current_session->timeout_ms > 0))
+    {
+        if (elapsed_ms > ctx->current_session->timeout_ms)
+        {
+            uds_info(ctx, "session timer expired, reset to default\n");
+            __uds_reset_to_default_session(ctx);
+            if (__uds_sa_vs_session_check(ctx, ctx->current_sa, ctx->current_session) != 0)
+            {
+                uds_info(ctx, "secure access not allowed in default session, reset it\n");
+                __uds_reset_secure_access(ctx);
+            }
+        }
+    }
+
     return 0;
 }

@@ -38,6 +38,7 @@ typedef struct __uds_session_cfg
 {
     uint8_t session_type;
     uint64_t sa_type_mask;
+    unsigned long timeout_ms;
 } uds_session_cfg_t;
 
 typedef struct __uds_sa_cfg
@@ -218,7 +219,8 @@ int uds_init(uds_context_t *ctx, const uds_config_t *config,
              uint8_t *response_buffer, size_t response_buffer_len, void *priv);
 void uds_deinit(uds_context_t *ctx);
 int uds_receive(uds_context_t *ctx, const uds_address_e addr_type,
-                const uint8_t *data, const size_t len);
-int uds_cycle(uds_context_t *ctx);
+                const uint8_t *data, const size_t len,
+                const struct timespec *timestamp);
+int uds_cycle(uds_context_t *ctx, const struct timespec *timestamp);
 
 #endif // __UDS_H

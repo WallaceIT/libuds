@@ -283,10 +283,12 @@ static const uds_session_cfg_t uds_sessions[] =
     {
         .session_type = 0x02, // Programming Session
         .sa_type_mask = UDS_CFG_SA_TYPE_ALL,
+        .timeout_ms = 3000,
     },
     {
         .session_type = 0x03, // Extended Diagnostic Session
         .sa_type_mask = UDS_CFG_SA_TYPE_ALL,
+        .timeout_ms = 3000,
     },
     {
         .session_type = 0x04, // Safety System Diagnostic Session
@@ -438,6 +440,8 @@ int main(int argc, char *argv[])
     unsigned char can_tp_phys_buf[5000];
     unsigned char can_tp_func_buf[5000];
 
+    struct timespec now;
+
     bool run = true;
     int i = 0;
     int ret;
@@ -556,6 +560,10 @@ int main(int argc, char *argv[])
         {
             fprintf(stderr, "epoll_wait interrupted by signal\n");
         }
+        else if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        {
+            fprintf(stderr, "clock_gettime failed: %s\n", strerror(errno));
+        }
 
         // Process events
         for (int n = 0; n < nfds; ++n)
@@ -594,7 +602,7 @@ int main(int argc, char *argv[])
                 size_t size = sizeof(can_tp_phys_buf);
                 if (can_tp_receive(private_data.fd_can_tp_phys, can_tp_phys_buf, &size) == 0)
                 {
-                    if (uds_receive(&uds_ctx, UDS_ADDRESS_PHYSICAL, can_tp_phys_buf, size) != 0)
+                    if (uds_receive(&uds_ctx, UDS_ADDRESS_PHYSICAL, can_tp_phys_buf, size, &now) != 0)
                     {
                         fprintf(stderr, "Failed to send to CAN-ISOTP\n");
                     }
@@ -609,7 +617,7 @@ int main(int argc, char *argv[])
                 size_t size = sizeof(can_tp_func_buf);
                 if (can_tp_receive(private_data.fd_can_tp_func, can_tp_func_buf, &size) == 0)
                 {
-                    if (uds_receive(&uds_ctx, UDS_ADDRESS_FUNCTIONAL, can_tp_func_buf, size) != 0)
+                    if (uds_receive(&uds_ctx, UDS_ADDRESS_FUNCTIONAL, can_tp_func_buf, size, &now) != 0)
                     {
                         fprintf(stderr, "Failed to send to CAN-ISOTP\n");
                     }
@@ -622,7 +630,7 @@ int main(int argc, char *argv[])
             else if (triggered_fd == fd_timer_uds)
             {
                 timer_reset(fd_timer_uds);
-                uds_cycle(&uds_ctx);
+                uds_cycle(&uds_ctx, &now);
             }
         }
     }
