@@ -931,6 +931,7 @@ static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
 
         uds_debug(ctx, "requested to write DID 0x%04X\n", identifier);
 
+        nrc = UDS_NRC_ROOR;
         for (d = 0; d < ctx->config->num_data_items; d++)
         {
             if (ctx->config->data_items[d].identifier == identifier)
@@ -1828,6 +1829,137 @@ static uint8_t __uds_svc_read_dtc_information(uds_context_t *ctx,
     return nrc;
 }
 
+static uint8_t __uds_svc_routine_control(uds_context_t *ctx,
+                                         const uint8_t *data, size_t data_len,
+                                         uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint8_t routine_control_type = 0x00;
+    uint16_t identifier = __UDS_INVALID_DATA_IDENTIFIER;
+
+    const uint8_t *control_data = NULL;
+    uint8_t *out_data = NULL;
+    size_t out_data_len = 0;
+    unsigned long r = 0;
+
+    if (data_len < 3)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        routine_control_type = __UDS_GET_SUBFUNCTION(data[0]);
+        identifier = (data[1] << 8) | (data[2] << 0);
+
+        if (data_len > 3)
+        {
+            control_data = &data[3];
+        }
+
+        if (*res_data_len > 3)
+        {
+            out_data = &res_data[3];
+            out_data_len = (*res_data_len - 3);
+        }
+
+        nrc = UDS_NRC_ROOR;
+        for (r = 0; r < ctx->config->num_routines; r++)
+        {
+            if (ctx->config->routines[r].identifier == identifier)
+            {
+                if (__uds_session_check(ctx, &ctx->config->ecureset.sec_reset_hard) != 0)
+                {
+                    nrc = UDS_NRC_SFNSIAS;
+                }
+                else if (__uds_security_check(ctx, &ctx->config->ecureset.sec_reset_hard) != 0)
+                {
+                    nrc = UDS_NRC_SAD;
+                }
+                else if (UDS_LEV_RCTP_STR == routine_control_type)
+                {
+                    if (NULL == ctx->config->routines[r].cb_start)
+                    {
+                        nrc = UDS_NRC_SFNS;
+                    }
+                    else if (ctx->config->routines[r].cb_start(ctx->priv, identifier,
+                                                               control_data, (data_len - 3),
+                                                               out_data, &out_data_len) != 0)
+                    {
+                        /* If start failed but routine is running, it means that
+                         * it was already running and cannot be restarted */
+                        if ((NULL != ctx->config->routines[r].cb_is_running) &&
+                            (ctx->config->routines[r].cb_is_running(ctx->priv, identifier) != 0))
+                        {
+                                uds_err(ctx, "cb_start(%04X) -> routine is already running\n",
+                                        identifier);
+                                nrc = UDS_NRC_RSE;
+                        }
+                        else
+                        {
+                            uds_err(ctx, "cb_start(%04X) failed\n", identifier);
+                            nrc = UDS_NRC_GPF;
+                        }
+                    }
+                    else
+                    {
+                        nrc = UDS_NRC_PR;
+                    }
+                }
+                else if (UDS_LEV_RCTP_STPR == routine_control_type)
+                {
+                    if (NULL == ctx->config->routines[r].cb_stop)
+                    {
+                        nrc = UDS_NRC_SFNS;
+                    }
+                    else if ((NULL != ctx->config->routines[r].cb_is_running) &&
+                            (ctx->config->routines[r].cb_is_running(ctx->priv, identifier) == 0))
+                    {
+                        uds_err(ctx, "cb_stop(%04X) -> routine is not running\n", identifier);
+                        nrc = UDS_NRC_RSE;
+                    }
+                    else if (ctx->config->routines[r].cb_stop(ctx->priv, identifier,
+                                                              control_data, (data_len - 3),
+                                                              out_data, &out_data_len) != 0)
+                    {
+                        uds_err(ctx, "cb_stop(%04X) failed\n", identifier);
+                        nrc = UDS_NRC_GPF;
+                    }
+                    else
+                    {
+                        nrc = UDS_NRC_PR;
+                    }
+                }
+                else if (UDS_LEV_RCTP_RRR == routine_control_type)
+                {
+                    if (NULL == ctx->config->routines[r].cb_req_results)
+                    {
+                        nrc = UDS_NRC_SFNS;
+                    }
+                    else if (ctx->config->routines[r].cb_req_results(ctx->priv, identifier,
+                                                                     out_data, &out_data_len) != 0)
+                    {
+                        uds_err(ctx, "cb_req_results(%04X) failed\n", identifier);
+                        nrc = UDS_NRC_RSE;
+                    }
+                    else
+                    {
+                        nrc = UDS_NRC_PR;
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    if (UDS_NRC_PR == nrc)
+    {
+        memcpy(res_data, data, 3);
+        *res_data_len = out_data_len + 3;
+    }
+
+    return nrc;
+}
+
 static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
                               const uint8_t *data, size_t data_len,
                               const uds_address_e addr_type)
@@ -1931,6 +2063,8 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
 
     /* Routine */
     case UDS_SVC_RC:
+        nrc = __uds_svc_routine_control(ctx, data, data_len,
+                                        res_data, &res_data_len);
         break;
 
     /* Upload Download */

@@ -165,6 +165,26 @@ typedef struct __uds_config_dtc_information
 
 } uds_config_dtc_information_t;
 
+typedef struct __uds_config_routine
+{
+    uint16_t identifier;
+
+    uds_security_cfg_t sec;
+
+    int (*cb_start)(void *priv, uint16_t identifier,
+                    const uint8_t *data, const size_t data_len,
+                    uint8_t *res_data, size_t *res_data_len);
+
+    int (*cb_stop)(void *priv, uint16_t identifier,
+                   const uint8_t *data, const size_t data_len,
+                   uint8_t *res_data, size_t *res_data_len);
+
+    int (*cb_req_results)(void *priv, uint16_t identifier,
+                          uint8_t *res_data, size_t *res_data_len);
+
+    int (*cb_is_running)(void *priv, uint16_t identifier);
+} uds_config_routine_t;
+
 typedef struct __uds_config
 {
     uint16_t p2;
@@ -191,6 +211,9 @@ typedef struct __uds_config
     unsigned long num_groups_of_dtc;
 
     const uds_config_dtc_information_t dtc_information;
+
+    const uds_config_routine_t *routines;
+    unsigned long num_routines;
 } uds_config_t;
 
 typedef struct __uds_context
