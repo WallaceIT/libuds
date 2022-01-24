@@ -912,6 +912,71 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
     return nrc;
 }
 
+static uint8_t __uds_svc_read_scaling_data_by_identifier(uds_context_t *ctx,
+                                                         const uint8_t *data, size_t data_len,
+                                                         uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint16_t identifier = __UDS_INVALID_DATA_IDENTIFIER;
+    unsigned long d = 0;
+
+    if (data_len != 3)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        identifier = (data[0] << 8) | (data[1] << 0);
+
+        uds_debug(ctx, "requested to read scaling data for DID 0x%04X\n", identifier);
+
+        nrc = UDS_NRC_ROOR;
+        for (d = 0; d < ctx->config->num_data_items; d++)
+        {
+            if (ctx->config->data_items[d].identifier == identifier)
+            {
+                if ((0 == ctx->config->data_items[d].scaling_data_size) ||
+                    (NULL == ctx->config->data_items[d].scaling_data))
+                {
+                    uds_info(ctx, "scaling_data not defined for ID 0x%04X\n",
+                             identifier);
+                    nrc = UDS_NRC_ROOR;
+                }
+                else if (__uds_session_check(ctx, &ctx->config->data_items[d].sec_read) != 0)
+                {
+                    uds_debug(ctx, "DID 0x%04X cannot be read in active session\n",
+                              identifier);
+                    nrc = UDS_NRC_ROOR;
+                }
+                else if (__uds_security_check(ctx, &ctx->config->data_items[d].sec_read) != 0)
+                {
+                    uds_debug(ctx, "DID 0x%04X cannot be read with current SA\n",
+                              identifier);
+                    nrc = UDS_NRC_SAD;
+                }
+                else if (*res_data_len < (2 + ctx->config->data_items[d].scaling_data_size))
+                {
+                    uds_info(ctx, "not enough space provided for scaling data\n");
+                    nrc = UDS_NRC_GR;
+                }
+                else
+                {
+                    nrc = UDS_NRC_PR;
+                    res_data[0] = (identifier >> 8) & 0xFF;
+                    res_data[1] = (identifier >> 0) & 0xFF;
+                    memcpy(&res_data[2],
+                           ctx->config->data_items[d].scaling_data,
+                           ctx->config->data_items[d].scaling_data_size);
+                    *res_data_len = (2 + ctx->config->data_items[d].scaling_data_size);
+                }
+                break;
+            }
+        }
+    }
+
+    return nrc;
+}
+
 static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
                                                   const uint8_t *data, size_t data_len,
                                                   uint8_t *res_data, size_t *res_data_len)
@@ -2026,6 +2091,8 @@ static int __uds_process_service(uds_context_t *ctx, const uint8_t service,
         break;
 
     case UDS_SVC_RSDBI:
+        nrc = __uds_svc_read_scaling_data_by_identifier(ctx, data, data_len,
+                                                        res_data, &res_data_len);
         break;
 
     case UDS_SVC_RDBPI:
