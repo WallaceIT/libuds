@@ -362,6 +362,8 @@ typedef struct __uds_config
     uint16_t p2max;
 
     int (*cb_send)(void *priv, const uint8_t data[], size_t len);
+    void (*cb_notify_session_change)(void *priv, const uint8_t session_type);
+    void (*cb_notify_sa_change)(void *priv, const uint8_t sa_index);
 
     const uds_session_cfg_t *session_config;
     unsigned long num_session_config;

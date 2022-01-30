@@ -29,6 +29,16 @@ static inline uint8_t __uds_sat_to_sa_index(const uint8_t sat)
     return ((sat - 1) / 2);
 }
 
+static inline void __uds_switch_to_session(uds_context_t *ctx,
+                                           const uds_session_cfg_t *session)
+{
+    ctx->current_session = session;
+    if (NULL != ctx->config->cb_notify_session_change)
+    {
+        ctx->config->cb_notify_session_change(ctx->priv, session->session_type);
+    }
+}
+
 static void __uds_reset_to_default_session(uds_context_t *ctx)
 {
     unsigned int s = 0;
@@ -36,20 +46,37 @@ static void __uds_reset_to_default_session(uds_context_t *ctx)
     {
         if (ctx->config->session_config[s].session_type == 0x01)
         {
-            ctx->current_session = &ctx->config->session_config[s];
+            __uds_switch_to_session(ctx, &ctx->config->session_config[s]);
             break;
         }
     }
 
     if (s == ctx->config->num_session_config)
     {
-        ctx->current_session = &__uds_default_session;
+        __uds_switch_to_session(ctx, &__uds_default_session);
     }
 }
 
-static void __uds_reset_secure_access(uds_context_t *ctx)
+static inline void __uds_activate_sa(uds_context_t *ctx, const uds_sa_cfg_t *sa)
 {
-    ctx->current_sa = NULL;
+    ctx->current_sa = sa;
+    if (NULL != ctx->config->cb_notify_sa_change)
+    {
+        if (NULL != sa)
+        {
+            uds_debug(ctx, "activating SA 0x%02X\n", sa->sa_index);
+            ctx->config->cb_notify_sa_change(ctx->priv, sa->sa_index);
+        }
+        else
+        {
+            ctx->config->cb_notify_sa_change(ctx->priv, __UDS_INVALID_SA_INDEX);
+        }
+    }
+}
+
+static inline void __uds_reset_secure_access(uds_context_t *ctx)
+{
+    __uds_activate_sa(ctx, NULL);
 }
 
 static inline int __uds_sa_vs_session_check(uds_context_t *ctx,
@@ -175,7 +202,7 @@ static uint8_t __uds_svc_session_control(uds_context_t *ctx,
                     __uds_reset_secure_access(ctx);
                 }
 
-                ctx->current_session = &ctx->config->session_config[s];
+                __uds_switch_to_session(ctx, &ctx->config->session_config[s]);
                 break;
             }
         }
@@ -546,8 +573,7 @@ static uint8_t __uds_svc_security_access(uds_context_t *ctx,
                         {
                             res_data[0] = sr;
                             *res_data_len = 1;
-                            uds_debug(ctx, "activating SA 0x%02X\n", sa_index);
-                            ctx->current_sa = &ctx->config->sa_config[l];
+                            __uds_activate_sa(ctx, &ctx->config->sa_config[l]);
                             ctx->current_sa_seed = __UDS_INVALID_SA_INDEX;
                             __uds_security_access_reset_failed_attempts(ctx);
                             nrc = UDS_NRC_PR;
