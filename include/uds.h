@@ -369,6 +369,9 @@ typedef struct __uds_config
     const uds_sa_cfg_t *sa_config;
     unsigned long num_sa_config;
 
+    unsigned long sa_max_attempts;
+    unsigned long sa_delay_timer_ms;
+
     const uds_config_ecureset_t ecureset;
     const uds_config_dtc_settings_t dtc_settings;
 
@@ -392,12 +395,14 @@ typedef struct __uds_context
     const uds_config_t *config;
     void *priv;
 
-    struct timespec timestamp;
+    struct timespec last_message_timestamp;
 
     unsigned int loglevel;
     const uds_session_cfg_t *current_session;
     uint8_t current_sa_seed;
     const uds_sa_cfg_t *current_sa;
+    unsigned long sa_failed_attempts;
+    struct timespec sa_delay_timer_timestamp;
 
     uint8_t *response_buffer;
     size_t response_buffer_len;
@@ -410,11 +415,13 @@ typedef enum __uds_address
 } uds_address_e;
 
 int uds_init(uds_context_t *ctx, const uds_config_t *config,
-             uint8_t *response_buffer, size_t response_buffer_len, void *priv);
+             uint8_t *response_buffer, size_t response_buffer_len, void *priv,
+             const struct timespec *timestamp);
 void uds_deinit(uds_context_t *ctx);
 int uds_receive(uds_context_t *ctx, const uds_address_e addr_type,
                 const uint8_t *data, const size_t len,
                 const struct timespec *timestamp);
 int uds_cycle(uds_context_t *ctx, const struct timespec *timestamp);
+void uds_reset_sa_delay_timer(uds_context_t *ctx);
 
 #endif // __UDS_H

@@ -402,6 +402,8 @@ static const uds_config_t uds_config =
 
     .sa_config = sas,
     .num_sa_config = sizeof(sas) / sizeof(uds_sa_cfg_t),
+    .sa_max_attempts = 5,
+    .sa_delay_timer_ms = 3000,
 
     .cb_send = uds_send_callback,
 
@@ -467,8 +469,14 @@ int main(int argc, char *argv[])
         }
     }
 
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+    {
+        fprintf(stderr, "clock_gettime failed: %s\n", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
     // Intialize UDS library
-    uds_init(&uds_ctx, &uds_config, uds_buffer, sizeof(uds_buffer), &private_data);
+    uds_init(&uds_ctx, &uds_config, uds_buffer, sizeof(uds_buffer), &private_data, &now);
 
     // Create poller
     epollfd = epoll_create1(0);
