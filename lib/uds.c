@@ -98,7 +98,7 @@ static inline int __uds_sa_vs_session_check(uds_context_t *ctx,
     return ret;
 }
 
-static inline int __uds_session_check(uds_context_t *ctx, const uds_security_cfg_t* cfg)
+static int __uds_session_check(uds_context_t *ctx, const uds_security_cfg_t* cfg)
 {
     int ret = -1;
 
@@ -125,7 +125,7 @@ static inline int __uds_session_check(uds_context_t *ctx, const uds_security_cfg
     return ret;
 }
 
-static inline int __uds_security_check(uds_context_t *ctx, const uds_security_cfg_t* cfg)
+static int __uds_security_check(uds_context_t *ctx, const uds_security_cfg_t* cfg)
 {
     int ret = -1;
 
@@ -144,6 +144,41 @@ static inline int __uds_security_check(uds_context_t *ctx, const uds_security_cf
     }
 
     return ret;
+}
+
+static inline int __uds_session_and_security_check(uds_context_t *ctx, const uds_security_cfg_t* cfg)
+{
+    int ret = -1;
+
+    if ((__uds_session_check(ctx, cfg) == 0) &&
+        (__uds_security_check(ctx, cfg) == 0))
+    {
+        ret = 0;
+    }
+
+    return ret;
+}
+
+static inline int __uds_data_transfer_active(uds_context_t *ctx)
+{
+    int ret = -1;
+
+    if ((UDS_DATA_TRANSFER_NONE != ctx->data_transfer.direction) &&
+        (NULL != ctx->data_transfer.mem_region))
+    {
+        ret = 0;
+    }
+
+    return ret;
+}
+
+static inline void __uds_data_transfer_reset(uds_context_t *ctx)
+{
+    ctx->data_transfer.direction = UDS_DATA_TRANSFER_NONE;
+    ctx->data_transfer.mem_region = NULL;
+    ctx->data_transfer.address = NULL;
+    ctx->data_transfer.prev_address = NULL;
+    ctx->data_transfer.bsqc = 0;
 }
 
 static int __uds_send(uds_context_t *ctx, const uint8_t *data, size_t len)
@@ -971,7 +1006,7 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
                         }
                         else
                         {
-                            ret = ctx->config->mem_regions[p].cb_read(ctx->priv, (void *)addr,
+                            ret = ctx->config->mem_regions[p].cb_read(ctx->priv, addr,
                                                                       &res_data[0], size);
                             if (ret != 0)
                             {
@@ -1240,7 +1275,7 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
                         }
                         else
                         {
-                            ret = ctx->config->mem_regions[p].cb_write(ctx->priv, (void *)addr,
+                            ret = ctx->config->mem_regions[p].cb_write(ctx->priv, addr,
                                                                        &data[1 + addr_len + size_len],
                                                                        size);
                             if (ret != 0)
@@ -2143,6 +2178,507 @@ static uint8_t __uds_svc_routine_control(uds_context_t *ctx,
     return nrc;
 }
 
+static uint8_t __uds_svc_request_download(uds_context_t *ctx,
+                                          const struct timespec *timestamp,
+                                          const uint8_t *data, size_t data_len,
+                                          uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint8_t compression_method = 0;
+    uint8_t encrypting_method = 0;
+    uint8_t addr_len = 0;
+    uint8_t size_len = 0;
+    void * addr = 0;
+    size_t size = 0;
+    unsigned long p = 0;
+    int ret;
+
+    __UDS_UNUSED(timestamp);
+
+    if (data_len < 4)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        encrypting_method  = (data[0] >> 0) & 0x0F;
+        compression_method = (data[0] >> 4) & 0x0F;
+
+        addr_len = (data[1] >> 0) & 0x0F;
+        size_len = (data[1] >> 4) & 0x0F;
+
+        if ((2U + addr_len + size_len) > data_len)
+        {
+            nrc = UDS_NRC_IMLOIF;
+        }
+        else
+        {
+            nrc = UDS_NRC_PR;
+
+            for (p = addr_len; p > 0; p--)
+            {
+                if (p <= sizeof(void*))
+                {
+                    addr = (void *)((uintptr_t)addr | ((0xFFULL & data[1 + p]) << (8 * (addr_len - p))));
+                }
+                else if (data[p] != 0x00)
+                {
+                    nrc = UDS_NRC_ROOR;
+                    break;
+                }
+            }
+
+            for (p = size_len; p > 0; p--)
+            {
+                if (p <= sizeof(size_t))
+                {
+                    size |= ((0xFFUL & data[1 + addr_len + p]) << (8 * (size_len - p)));
+                }
+                else if (data[addr_len + p] != 0x00)
+                {
+                    nrc = UDS_NRC_ROOR;
+                    break;
+                }
+            }
+
+            if (UDS_NRC_PR != nrc)
+            {
+                uds_debug(ctx, "requested download with invalid parameters\n");
+                // Nothing to do, NRC is already set
+            }
+            else if (size == 0)
+            {
+                uds_info(ctx, "request download at %p with null size\n", addr);
+                nrc = UDS_NRC_ROOR;
+            }
+            else
+            {
+                uds_debug(ctx, "request to download at %p, size %lu\n", addr, size);
+
+                for (p = 0; p < ctx->config->num_mem_regions; p++)
+                {
+                    if ((addr >= ctx->config->mem_regions[p].start) &&
+                        (addr <= ctx->config->mem_regions[p].stop) &&
+                        (NULL != ctx->config->mem_regions[p].cb_download_request) &&
+                        (NULL != ctx->config->mem_regions[p].cb_download))
+                    {
+                        if (((uintptr_t)addr + size) > (uintptr_t)ctx->config->mem_regions[p].stop)
+                        {
+                            uds_debug(ctx, "download size too large\n");
+                            nrc = UDS_NRC_ROOR;
+                        }
+                        else if (__uds_session_check(ctx, &ctx->config->mem_regions[p].sec_download) != 0)
+                        {
+                            nrc = UDS_NRC_ROOR;
+                        }
+                        else if (__uds_security_check(ctx, &ctx->config->mem_regions[p].sec_download) != 0)
+                        {
+                            nrc = UDS_NRC_SAD;
+                        }
+                        else if (ctx->data_transfer.direction != UDS_DATA_TRANSFER_NONE)
+                        {
+                            nrc = UDS_NRC_CNC;
+                        }
+                        else
+                        {
+                            ret = ctx->config->mem_regions[p].cb_download_request(ctx->priv,
+                                                                                  addr, size,
+                                                                                  compression_method,
+                                                                                  encrypting_method,
+                                                                                  &ctx->data_transfer.max_block_len);
+                            if (ret != 0)
+                            {
+                                uds_err(ctx, "failed to request download at %p, len = %lu\n", addr, size);
+                                nrc = UDS_NRC_UDNA;
+                            }
+                            else
+                            {
+                                /* The max_block_len length reflects the complete message length,
+                                 * including the service identifier and the data-parameters */
+                                size_len = sizeof(size_t);
+                                res_data[0] = (size_len & 0xF) << 4;
+                                for (p = size_len; p > 0; p--)
+                                {
+                                    res_data[p] = ((ctx->data_transfer.max_block_len + 2) >> (8 * (p - 1))) & 0xFF;
+                                }
+                                *res_data_len = (1 + size_len);
+                                nrc = UDS_NRC_PR;
+
+                                ctx->data_transfer.direction = UDS_DATA_TRANSFER_DOWNLOAD;
+                                ctx->data_transfer.mem_region = &ctx->config->mem_regions[p];
+                                /* Block sequence counter starts from 1 */
+                                ctx->data_transfer.bsqc = 0x01;
+                            }
+                        }
+                        break;
+                    }
+                }
+
+                if (p == ctx->config->num_mem_regions)
+                {
+                    uds_debug(ctx, "download address %p non found in any region\n", addr);
+                    nrc = UDS_NRC_ROOR;
+                }
+            }
+        }
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_svc_request_upload(uds_context_t *ctx,
+                                        const struct timespec *timestamp,
+                                        const uint8_t *data, size_t data_len,
+                                        uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint8_t compression_method = 0;
+    uint8_t encrypting_method = 0;
+    uint8_t addr_len = 0;
+    uint8_t size_len = 0;
+    void * addr = 0;
+    size_t size = 0;
+    unsigned long p = 0;
+    int ret;
+
+    __UDS_UNUSED(timestamp);
+
+    if (data_len < 4)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        encrypting_method  = (data[0] >> 0) & 0x0F;
+        compression_method = (data[0] >> 4) & 0x0F;
+
+        addr_len = (data[1] >> 0) & 0x0F;
+        size_len = (data[1] >> 4) & 0x0F;
+
+        if ((2U + addr_len + size_len) > data_len)
+        {
+            nrc = UDS_NRC_IMLOIF;
+        }
+        else
+        {
+            nrc = UDS_NRC_PR;
+
+            for (p = addr_len; p > 0; p--)
+            {
+                if (p <= sizeof(void*))
+                {
+                    addr = (void *)((uintptr_t)addr | ((0xFFULL & data[1 + p]) << (8 * (addr_len - p))));
+                }
+                else if (data[p] != 0x00)
+                {
+                    nrc = UDS_NRC_ROOR;
+                    break;
+                }
+            }
+
+            for (p = size_len; p > 0; p--)
+            {
+                if (p <= sizeof(size_t))
+                {
+                    size |= ((0xFFUL & data[1 + addr_len + p]) << (8 * (size_len - p)));
+                }
+                else if (data[addr_len + p] != 0x00)
+                {
+                    nrc = UDS_NRC_ROOR;
+                    break;
+                }
+            }
+
+            if (UDS_NRC_PR != nrc)
+            {
+                uds_debug(ctx, "requested upload with invalid parameters\n");
+                // Nothing to do, NRC is already set
+            }
+            else if (size == 0)
+            {
+                uds_info(ctx, "request upload from %p with null size\n", addr);
+                nrc = UDS_NRC_ROOR;
+            }
+            else
+            {
+                uds_debug(ctx, "request to upload from %p, size %lu\n", addr, size);
+
+                for (p = 0; p < ctx->config->num_mem_regions; p++)
+                {
+                    if ((addr >= ctx->config->mem_regions[p].start) &&
+                        (addr <= ctx->config->mem_regions[p].stop) &&
+                        (NULL != ctx->config->mem_regions[p].cb_upload_request) &&
+                        (NULL != ctx->config->mem_regions[p].cb_upload))
+                    {
+                        if (((uintptr_t)addr + size) > (uintptr_t)ctx->config->mem_regions[p].stop)
+                        {
+                            uds_debug(ctx, "upload size too large\n");
+                            nrc = UDS_NRC_ROOR;
+                        }
+                        else if (__uds_session_check(ctx, &ctx->config->mem_regions[p].sec_upload) != 0)
+                        {
+                            nrc = UDS_NRC_ROOR;
+                        }
+                        else if (__uds_security_check(ctx, &ctx->config->mem_regions[p].sec_upload) != 0)
+                        {
+                            nrc = UDS_NRC_SAD;
+                        }
+                        else if (ctx->data_transfer.direction != UDS_DATA_TRANSFER_NONE)
+                        {
+                            nrc = UDS_NRC_CNC;
+                        }
+                        else
+                        {
+                            ret = ctx->config->mem_regions[p].cb_upload_request(ctx->priv,
+                                                                                  addr, size,
+                                                                                  compression_method,
+                                                                                  encrypting_method,
+                                                                                  &ctx->data_transfer.max_block_len);
+                            if (ret != 0)
+                            {
+                                uds_err(ctx, "failed to request upload from %p, len = %lu\n", addr, size);
+                                nrc = UDS_NRC_UDNA;
+                            }
+                            else
+                            {
+                                /* The max_block_size length reflects the complete message length,
+                                 * including the service identifier and the data-parameters */
+                                size_len = sizeof(size_t);
+                                res_data[0] = (size_len & 0xF) << 4;
+                                for (p = size_len; p > 0; p--)
+                                {
+                                    res_data[p] = ((ctx->data_transfer.max_block_len + 2) >> (8 * (p - 1))) & 0xFF;
+                                }
+                                *res_data_len = (1 + size_len);
+                                nrc = UDS_NRC_PR;
+
+                                ctx->data_transfer.direction = UDS_DATA_TRANSFER_UPLOAD;
+                                ctx->data_transfer.mem_region = &ctx->config->mem_regions[p];
+                                /* Block sequence counter starts from 1 */
+                                ctx->data_transfer.bsqc = 0x01;
+                            }
+                        }
+                        break;
+                    }
+                }
+
+                if (p == ctx->config->num_mem_regions)
+                {
+                    uds_debug(ctx, "upload address %p non found in any region\n", addr);
+                    nrc = UDS_NRC_ROOR;
+                }
+            }
+        }
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_transmit_data_download(uds_context_t *ctx, uint8_t bsqc,
+                                            const uint8_t *data, size_t data_len,
+                                            uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    int ret;
+
+    if (data_len > ctx->data_transfer.max_block_len)
+    {
+        nrc = UDS_NRC_ROOR;
+    }
+    else if (bsqc == ctx->data_transfer.bsqc)
+    {
+        ret = ctx->data_transfer.mem_region->cb_download(ctx->priv,
+                                                         ctx->data_transfer.address,
+                                                         data, data_len);
+        if (ret != 0)
+        {
+            uds_err(ctx, "download of block %u failed (address %p, size %lu)\n",
+                    bsqc, ctx->data_transfer.address, data_len);
+            nrc = UDS_NRC_GPF;
+        }
+        else
+        {
+            nrc = UDS_NRC_PR;
+            res_data[0] = bsqc;
+            *res_data_len = 1;
+            ctx->data_transfer.bsqc = (ctx->data_transfer.bsqc + 1) & 0xFF;
+            ctx->data_transfer.address = (void *)((uintptr_t)ctx->data_transfer.address + data_len);
+        }
+    }
+    else if (bsqc == ((ctx->data_transfer.bsqc - 1) & 0xFF))
+    {
+        /* Requested download of previous block: it means that the client did
+         * not receive the positive response, resend it */
+        nrc = UDS_NRC_PR;
+        res_data[0] = bsqc;
+        *res_data_len = 1;
+    }
+    else
+    {
+        uds_warning(ctx, "wrong block sequence counter %u, expected %u or %u\n",
+                    bsqc, ctx->data_transfer.bsqc,
+                    (ctx->data_transfer.bsqc - 1) & 0xFF);
+        nrc = UDS_NRC_WBSC;
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_transmit_data_upload(uds_context_t *ctx, uint8_t bsqc,
+                                          uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    size_t read_data = (*res_data_len - 1);
+    int ret;
+
+    if (read_data < ctx->data_transfer.max_block_len)
+    {
+        nrc = UDS_NRC_ROOR;
+    }
+    else if (bsqc == ctx->data_transfer.bsqc)
+    {
+        ret = ctx->data_transfer.mem_region->cb_upload(ctx->priv,
+                                                       ctx->data_transfer.address,
+                                                       &res_data[1], &read_data);
+        if (ret != 0)
+        {
+            uds_err(ctx, "upload of block %u failed (address %p)\n",
+                    bsqc, ctx->data_transfer.address);
+            nrc = UDS_NRC_GPF;
+        }
+        else
+        {
+            nrc = UDS_NRC_PR;
+            res_data[0] = bsqc;
+            *res_data_len = (read_data + 1);
+            ctx->data_transfer.bsqc = (ctx->data_transfer.bsqc + 1) & 0xFF;
+            ctx->data_transfer.prev_address = ctx->data_transfer.address;
+            ctx->data_transfer.address = (void *)((uintptr_t)ctx->data_transfer.address + read_data);
+        }
+    }
+    else if ((bsqc == ((ctx->data_transfer.bsqc - 1) & 0xFF)) &&
+             (NULL != ctx->data_transfer.prev_address))
+    {
+        ret = ctx->data_transfer.mem_region->cb_upload(ctx->priv,
+                                                       ctx->data_transfer.prev_address,
+                                                       &res_data[1], &read_data);
+        if (ret != 0)
+        {
+            uds_err(ctx, "re-upload of block %u failed (address %p)\n",
+                    bsqc, ctx->data_transfer.prev_address);
+            nrc = UDS_NRC_GPF;
+        }
+        else
+        {
+            nrc = UDS_NRC_PR;
+            res_data[0] = bsqc;
+            *res_data_len = (read_data + 1);
+        }
+    }
+    else
+    {
+        uds_warning(ctx, "wrong block sequence counter %u, expected %u or %u\n",
+                    bsqc, ctx->data_transfer.bsqc,
+                    (ctx->data_transfer.bsqc - 1) & 0xFF);
+        nrc = UDS_NRC_WBSC;
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_svc_transmit_data(uds_context_t *ctx,
+                                       const struct timespec *timestamp,
+                                       const uint8_t *data, size_t data_len,
+                                       uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+
+    __UDS_UNUSED(timestamp);
+
+    if (UDS_DATA_TRANSFER_DOWNLOAD == ctx->data_transfer.direction)
+    {
+        if (data_len < 2)
+        {
+            nrc = UDS_NRC_IMLOIF;
+        }
+        else
+        {
+            nrc = __uds_transmit_data_download(ctx, data[0],
+                                               &data[1], (data_len - 1),
+                                               res_data, res_data_len);
+        }
+    }
+    else if (UDS_DATA_TRANSFER_UPLOAD == ctx->data_transfer.direction)
+    {
+        if (data_len < 1)
+        {
+            nrc = UDS_NRC_IMLOIF;
+        }
+        else
+        {
+            nrc = __uds_transmit_data_upload(ctx, data[0],
+                                             res_data, res_data_len);
+        }
+    }
+    else
+    {
+        nrc = UDS_NRC_RSE;
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_svc_request_transfer_exit(uds_context_t *ctx,
+                                               const struct timespec *timestamp,
+                                               const uint8_t *data, size_t data_len,
+                                               uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    int ret;
+
+    __UDS_UNUSED(timestamp);
+    __UDS_UNUSED(data);
+    __UDS_UNUSED(data_len);
+    __UDS_UNUSED(res_data);
+
+    *res_data_len = 0;
+
+    if (UDS_DATA_TRANSFER_DOWNLOAD == ctx->data_transfer.direction)
+    {
+        nrc = UDS_NRC_PR;
+        if (NULL != ctx->data_transfer.mem_region->cb_download_exit)
+        {
+            ret = ctx->data_transfer.mem_region->cb_download_exit(ctx->priv);
+            if (ret != 0)
+            {
+                uds_err(ctx, "download exit failed\n");
+                nrc = UDS_NRC_GPF;
+            }
+        }
+        __uds_data_transfer_reset(ctx);
+    }
+    else if (UDS_DATA_TRANSFER_UPLOAD == ctx->data_transfer.direction)
+    {
+        nrc = UDS_NRC_PR;
+        if (NULL != ctx->data_transfer.mem_region->cb_upload_exit)
+        {
+            ret = ctx->data_transfer.mem_region->cb_upload_exit(ctx->priv);
+            if (ret != 0)
+            {
+                uds_err(ctx, "upload exit failed\n");
+                nrc = UDS_NRC_GPF;
+            }
+        }
+        __uds_data_transfer_reset(ctx);
+    }
+    else
+    {
+        nrc = UDS_NRC_RSE;
+    }
+
+    return nrc;
+}
+
 static int __uds_process_service(uds_context_t *ctx,
                                  const struct timespec *timestamp,
                                  const uint8_t service,
@@ -2255,13 +2791,24 @@ static int __uds_process_service(uds_context_t *ctx,
         break;
 
     /* Upload Download */
+    case UDS_SVC_RD:
+        nrc = __uds_svc_request_download(ctx, timestamp, data, data_len,
+                                         res_data, &res_data_len);
+        break;
+
     case UDS_SVC_RU:
+        nrc = __uds_svc_request_upload(ctx, timestamp, data, data_len,
+                                       res_data, &res_data_len);
         break;
 
     case UDS_SVC_TD:
+        nrc = __uds_svc_transmit_data(ctx, timestamp, data, data_len,
+                                      res_data, &res_data_len);
         break;
 
     case UDS_SVC_RTE:
+        nrc = __uds_svc_request_transfer_exit(ctx, timestamp, data, data_len,
+                                              res_data, &res_data_len);
         break;
 
     case UDS_SVC_RFT:
@@ -2474,6 +3021,20 @@ int uds_cycle(uds_context_t *ctx, const struct timespec *timestamp)
             {
                 uds_info(ctx, "secure access not allowed in default session, reset it\n");
                 __uds_reset_secure_access(ctx);
+            }
+
+            if (__uds_data_transfer_active(ctx))
+            {
+                if ((UDS_DATA_TRANSFER_DOWNLOAD == ctx->data_transfer.direction) &&
+                    (__uds_session_and_security_check(ctx, &ctx->data_transfer.mem_region->sec_download) != 0))
+                {
+                    __uds_data_transfer_reset(ctx);
+                }
+                else if ((UDS_DATA_TRANSFER_UPLOAD == ctx->data_transfer.direction) &&
+                         (__uds_session_and_security_check(ctx, &ctx->data_transfer.mem_region->sec_upload) != 0))
+                {
+                    __uds_data_transfer_reset(ctx);
+                }
             }
         }
     }

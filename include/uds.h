@@ -293,6 +293,26 @@ typedef struct __uds_config_memory_region
     int (*cb_write)(void *priv, const void *address,
                     const uint8_t *data, const size_t data_len);
     uds_security_cfg_t sec_write;
+
+    int (*cb_download_request)(void *priv, const void *address,
+                               const size_t data_len,
+                               const uint8_t compression_method,
+                               const uint8_t encrypting_method,
+                               size_t *max_block_len);
+    int (*cb_download)(void *priv, const void *address,
+                       const uint8_t *data, const size_t data_len);
+    int (*cb_download_exit)(void *priv);
+    uds_security_cfg_t sec_download;
+
+    int (*cb_upload_request)(void *priv, const void *address,
+                             const size_t data_len,
+                             const uint8_t compression_method,
+                             const uint8_t encrypting_method,
+                             size_t *max_block_len);
+    int (*cb_upload)(void *priv, const void *address,
+                     uint8_t *data, size_t *data_len);
+    int (*cb_upload_exit)(void *priv);
+    uds_security_cfg_t sec_upload;
 } uds_config_memory_region_t;
 
 typedef struct __uds_config_group_of_dtc
@@ -392,6 +412,13 @@ typedef struct __uds_config
     unsigned long num_routines;
 } uds_config_t;
 
+typedef enum __uds_data_transfer_dir
+{
+    UDS_DATA_TRANSFER_NONE,
+    UDS_DATA_TRANSFER_DOWNLOAD,
+    UDS_DATA_TRANSFER_UPLOAD,
+} uds_data_transfer_dir_e;
+
 typedef struct __uds_context
 {
     const uds_config_t *config;
@@ -405,6 +432,16 @@ typedef struct __uds_context
     const uds_sa_cfg_t *current_sa;
     unsigned long sa_failed_attempts;
     struct timespec sa_delay_timer_timestamp;
+
+    struct
+    {
+        uds_data_transfer_dir_e direction;
+        const uds_config_memory_region_t *mem_region;
+        size_t max_block_len;
+        uint8_t bsqc;
+        void *prev_address;
+        void *address;
+    } data_transfer;
 
     uint8_t *response_buffer;
     size_t response_buffer_len;

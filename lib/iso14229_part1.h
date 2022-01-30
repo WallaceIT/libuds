@@ -66,6 +66,7 @@
 #define UDS_SVC_WDBI            0x2E // Write Data By Identifier
 #define UDS_SVC_IOCBI           0x2F // Input/Output Control By Identifier
 #define UDS_SVC_RC              0x31 // Routine Control
+#define UDS_SVC_RD              0x34 // Request Download
 #define UDS_SVC_RU              0x35 // Request Upload
 #define UDS_SVC_TD              0x36 // Transfer Data
 #define UDS_SVC_RTE             0x37 // Request Transfer Exit
