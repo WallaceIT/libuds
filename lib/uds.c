@@ -78,13 +78,17 @@ static inline int __uds_session_check(uds_context_t *ctx, const uds_security_cfg
     uds_debug(ctx, "standard_sm = 0x%016lX\n", cfg->standard_session_mask);
     uds_debug(ctx, "specific_sm = 0x%016lX\n", cfg->specific_session_mask);
 
-    if ((ctx->current_session->session_type < 64) &&
+    if (ctx->current_session->session_type >= 128)
+    {
+        uds_err(ctx, "invalid current session 0x%02X\n", ctx->current_session->session_type);
+    }
+    else if ((ctx->current_session->session_type < 64) &&
         ((UDS_CFG_SESSION_MASK(ctx->current_session->session_type) & cfg->standard_session_mask) != 0))
     {
         ret = 0;
     }
     else if ((ctx->current_session->session_type >= 64) &&
-             ((UDS_CFG_SESSION_MASK(ctx->current_session->session_type) & cfg->specific_session_mask) != 0))
+             ((UDS_CFG_SESSION_MASK((ctx->current_session->session_type-64)) & cfg->specific_session_mask) != 0))
     {
         ret = 0;
     }
@@ -147,7 +151,7 @@ static uint8_t __uds_svc_session_control(uds_context_t *ctx,
     uint8_t requested_session = 0x00;
     unsigned int s = 0;
 
-    if (1 != data_len)
+    if (data_len != 1)
     {
         nrc = UDS_NRC_IMLOIF;
     }
@@ -202,7 +206,7 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
     uint8_t nrc = UDS_NRC_GR;
     uint8_t reset_type = 0;
 
-    if (1 != data_len)
+    if (data_len < 1)
     {
         nrc = UDS_NRC_IMLOIF;
     }
@@ -210,7 +214,7 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
     {
         reset_type = __UDS_GET_SUBFUNCTION(data[0]);
 
-        if ((UDS_LEV_RT_HR == reset_type) && 
+        if ((UDS_LEV_RT_HR == reset_type) &&
             (NULL != ctx->config->ecureset.cb_reset_hard))
         {
             if (__uds_session_check(ctx, &ctx->config->ecureset.sec_reset_hard) != 0)
@@ -231,7 +235,7 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
                 nrc = UDS_NRC_PR;
             }
         }
-        else if ((UDS_LEV_RT_KOFFONR == reset_type) && 
+        else if ((UDS_LEV_RT_KOFFONR == reset_type) &&
                  (NULL != ctx->config->ecureset.cb_reset_keyoffon))
         {
             if (__uds_session_check(ctx, &ctx->config->ecureset.sec_reset_keyoffon) != 0)
@@ -252,7 +256,7 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
                 nrc = UDS_NRC_PR;
             }
         }
-        else if ((UDS_LEV_RT_SR == reset_type) && 
+        else if ((UDS_LEV_RT_SR == reset_type) &&
                  (NULL != ctx->config->ecureset.cb_reset_soft))
         {
             if (__uds_session_check(ctx, &ctx->config->ecureset.sec_reset_soft) != 0)
@@ -273,7 +277,7 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
                 nrc = UDS_NRC_PR;
             }
         }
-        else if ((UDS_LEV_RT_ERPSD == reset_type) && 
+        else if ((UDS_LEV_RT_ERPSD == reset_type) &&
                  (NULL != ctx->config->ecureset.cb_enable_rps))
         {
             if (data_len < 2)
@@ -298,7 +302,7 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
                 nrc = UDS_NRC_PR;
             }
         }
-        else if ((UDS_LEV_RT_ERPSD == reset_type) && 
+        else if ((UDS_LEV_RT_ERPSD == reset_type) &&
                  (NULL != ctx->config->ecureset.cb_disable_rps))
         {
             if (__uds_session_check(ctx, &ctx->config->ecureset.sec_rps) != 0)
@@ -526,6 +530,8 @@ static uint8_t __uds_svc_tester_present(uds_context_t *ctx,
                                         uint8_t *res_data, size_t *res_data_len)
 {
     uint8_t nrc = UDS_NRC_GR;
+
+    (void)ctx;
 
     if (1 != data_len)
     {
@@ -802,7 +808,7 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
     uint8_t size_len = 0;
     void * addr = 0;
     size_t size = 0;
-    long p = 0;
+    unsigned long p = 0;
     int ret;
 
     if (data_len < 3)
@@ -814,7 +820,7 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
         addr_len = (data[0] >> 0) & 0x0F;
         size_len = (data[0] >> 4) & 0x0F;
 
-        if ((1 + addr_len + size_len) > data_len)
+        if ((1U + addr_len + size_len) > data_len)
         {
             nrc = UDS_NRC_IMLOIF;
         }
@@ -822,26 +828,30 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
         {
             nrc = UDS_NRC_PR;
 
-            for (p = addr_len - 1; p >= 0; p--)
+            /* Extract address from incoming data; p starts at addr_len because
+             * address is stored inside data[] starting from data[1] */
+            for (p = addr_len; p > 0; p--)
             {
-                if (p < sizeof(void*))
+                if (p <= sizeof(void*))
                 {
-                    addr = (void *)((unsigned long long)addr | ((0xFFULL & data[1 + p]) << (8 * (addr_len - 1 - p))));
+                    addr = (void *)((uintptr_t)addr | ((0xFFULL & data[p]) << (8 * (addr_len - p))));
                 }
-                else if (data[1 + p] != 0x00)
+                else if (data[p] != 0x00)
                 {
                     nrc = UDS_NRC_ROOR;
                     break;
                 }
             }
 
-            for (p = size_len - 1; p >= 0; p--)
+            /* Extract size from incoming data; p starts at size_len because
+             * address is stored inside data[] starting from data[1] */
+            for (p = size_len; p > 0; p--)
             {
-                if (p < sizeof(size_t))
+                if (p <= sizeof(size_t))
                 {
-                    size |= ((0xFFUL & data[1 + addr_len + p]) << (8 * (size_len - 1 - p)));
+                    size |= ((0xFFUL & data[addr_len + p]) << (8 * (size_len - p)));
                 }
-                else if (data[1 + addr_len + p] != 0x00)
+                else if (data[addr_len + p] != 0x00)
                 {
                     nrc = UDS_NRC_ROOR;
                     break;
@@ -868,7 +878,7 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
                         (addr <= ctx->config->mem_regions[p].stop) &&
                         (NULL != ctx->config->mem_regions[p].cb_read))
                     {
-                        if ((addr + size) > ctx->config->mem_regions[p].stop)
+                        if (((uintptr_t)addr + size) > (uintptr_t)ctx->config->mem_regions[p].stop)
                         {
                             uds_debug(ctx, "memory read size too large\n");
                             nrc = UDS_NRC_ROOR;
@@ -1053,7 +1063,7 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
     uint8_t size_len = 0;
     void * addr = 0;
     size_t size = 0;
-    long p = 0;
+    unsigned long p = 0;
     int ret;
 
     if (data_len < 4)
@@ -1065,11 +1075,11 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
         addr_len = (data[0] >> 0) & 0x0F;
         size_len = (data[0] >> 4) & 0x0F;
 
-        if ((1 + addr_len + size_len) > data_len)
+        if ((1UL + addr_len + size_len) > data_len)
         {
             nrc = UDS_NRC_IMLOIF;
         }
-        else if ((1 + addr_len + size_len) > *res_data_len)
+        else if ((1UL + addr_len + size_len) > *res_data_len)
         {
             uds_info(ctx, "not enough space provided for memory write response\n");
             nrc = UDS_NRC_GR;
@@ -1078,26 +1088,30 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
         {
             nrc = UDS_NRC_PR;
 
-            for (p = addr_len - 1; p >= 0; p--)
+            /* Extract address from incoming data; p starts at addr_len because
+             * address is stored inside data[] starting from data[1] */
+            for (p = addr_len; p > 0; p--)
             {
-                if (p < sizeof(void*))
+                if (p <= sizeof(void*))
                 {
-                    addr = (void *)((unsigned long long)addr | ((0xFFULL & data[1 + p]) << (8 * (addr_len - 1 - p))));
+                    addr = (void *)((uintptr_t)addr | ((0xFFULL & data[p]) << (8 * (addr_len - p))));
                 }
-                else if (data[1 + p] != 0x00)
+                else if (data[p] != 0x00)
                 {
                     nrc = UDS_NRC_ROOR;
                     break;
                 }
             }
 
-            for (p = size_len - 1; p >= 0; p--)
+            /* Extract size from incoming data; p starts at size_len because
+             * size is stored inside data[] starting from data[1 + addr_len] */
+            for (p = size_len; p > 0; p--)
             {
                 if (p < sizeof(size_t))
                 {
-                    size |= ((0xFFUL & data[1 + addr_len + p]) << (8 * (size_len - 1 - p)));
+                    size |= ((0xFFUL & data[addr_len + p]) << (8 * (size_len - p)));
                 }
-                else if (data[1 + addr_len + p] != 0x00)
+                else if (data[addr_len + p] != 0x00)
                 {
                     nrc = UDS_NRC_ROOR;
                     break;
@@ -1124,7 +1138,7 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
                         (addr <= ctx->config->mem_regions[p].stop) &&
                         (NULL != ctx->config->mem_regions[p].cb_write))
                     {
-                        if ((addr + size) > ctx->config->mem_regions[p].stop)
+                        if (((uintptr_t)addr + size) > (uintptr_t)ctx->config->mem_regions[p].stop)
                         {
                             uds_debug(ctx, "memory write size too large\n");
                             nrc = UDS_NRC_ROOR;
@@ -1258,6 +1272,9 @@ static uint8_t __uds_svc_clear_diagnostic_information(uds_context_t *ctx,
     uint8_t nrc = UDS_NRC_GR;
     uint32_t godtc = __UDS_INVALID_GROUP_OF_DTC;
     unsigned int d = 0;
+
+    (void)res_data;
+    (void)res_data_len;
 
     if (data_len != 4)
     {
@@ -1426,6 +1443,9 @@ static uint8_t __uds_rdtci_report_dtc_snapshot_identification(uds_context_t *ctx
     unsigned long d = 0;
     unsigned long r = 0;
 
+    (void)data;
+    (void)data_len;
+
     if (NULL == ctx->config->dtc_information.cb_is_dtc_snapshot_record_available)
     {
         uds_debug(ctx, "cb_is_dtc_snapshot_record_available not defined\n");
@@ -1438,7 +1458,7 @@ static uint8_t __uds_rdtci_report_dtc_snapshot_identification(uds_context_t *ctx
             dtc_number = ctx->config->dtc_information.dtcs[d].dtc_number;
             for (r = 0; r < 0xFF; r++)
             {
-                if (((out_data - res_data) + 4) > *res_data_len)
+                if (((uintptr_t)(out_data - res_data) + 4) > *res_data_len)
                 {
                     break;
                 }
@@ -1686,7 +1706,7 @@ static uint8_t __uds_rdtci_report_dtc_extended_data(uds_context_t *ctx,
                     // OBD extended data records
                     record_start = 0x90;
                     record_stop = 0xEF;
-                    
+
                 }
                 else if (0xFF == record_number)
                 {
@@ -2279,6 +2299,7 @@ int uds_init(uds_context_t *ctx, const uds_config_t *config,
 
 void uds_deinit(uds_context_t *ctx)
 {
+    (void)ctx;
     return;
 }
 
@@ -2334,7 +2355,7 @@ int uds_cycle(uds_context_t *ctx, const struct timespec *timestamp)
     if ((elapsed_ms > 0) &&
         (NULL != ctx->current_session) && (ctx->current_session->timeout_ms > 0))
     {
-        if (elapsed_ms > ctx->current_session->timeout_ms)
+        if ((unsigned long)elapsed_ms > ctx->current_session->timeout_ms)
         {
             uds_info(ctx, "session timer expired, reset to default\n");
             __uds_reset_to_default_session(ctx);
