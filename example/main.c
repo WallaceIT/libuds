@@ -65,7 +65,7 @@ static int can_tp_init(const char *interface, uint32_t rx_id, uint32_t tx_id, bo
 
     memset(&fcopts, 0, sizeof(fcopts));
     fcopts.bs = 0;
-    fcopts.stmin = 20;
+    fcopts.stmin = 5;
     fcopts.wftmax = 10;
     setsockopt(fd, SOL_CAN_ISOTP, CAN_ISOTP_RECV_FC, &fcopts, sizeof(fcopts));
 
@@ -381,10 +381,12 @@ static const uds_config_data_t data_items[] =
 {
     {
         .identifier = 0xF190,
+
         .cb_read = data_read,
         .sec_read.sa_type_mask = UDS_CFG_SA_TYPE_NONE,
         .sec_read.standard_session_mask = UDS_CFG_SESSION_MASK_ALL,
         .sec_read.specific_session_mask = UDS_CFG_SESSION_MASK_ALL,
+
         .cb_write = data_write,
         .sec_write.sa_type_mask = UDS_CFG_SA_TYPE(0),
         .sec_write.standard_session_mask = UDS_CFG_SESSION_MASK(3),
@@ -392,10 +394,167 @@ static const uds_config_data_t data_items[] =
     }
 };
 
+static int mem_region_read(void *priv, const void *address,
+                           uint8_t *data, const size_t data_len)
+{
+    return 0;
+}
+
+static int mem_region_write(void *priv, const void *address,
+                            const uint8_t *data, const size_t data_len)
+{
+    return 0;
+}
+
+static int mem_region_download_request(void *priv, const void *address,
+                                       const size_t data_len,
+                                       const uint8_t compression_method,
+                                       const uint8_t encrypting_method,
+                                       size_t *max_block_len)
+{
+    *max_block_len = 512;
+
+    return 0;
+}
+
+static int mem_region_download(void *priv, const void *address,
+                               const uint8_t *data, const size_t data_len)
+{
+    return 0;
+}
+
+static int mem_region_download_exit(void *priv)
+{
+    return 0;
+}
+
+static const uds_config_memory_region_t mem_regions[] = 
+{
+    {
+        .start = (const void *)0x00000000,
+        .stop  = (const void *)0x00100000,
+
+        .cb_read = mem_region_read,
+        .sec_read.sa_type_mask = UDS_CFG_SA_TYPE_NONE,
+        .sec_read.standard_session_mask = UDS_CFG_SESSION_MASK_ALL,
+        .sec_read.specific_session_mask = UDS_CFG_SESSION_MASK_ALL,
+
+        .cb_write = mem_region_write,
+        .sec_write.sa_type_mask = UDS_CFG_SA_TYPE_NONE,
+        .sec_write.standard_session_mask = UDS_CFG_SESSION_MASK_ALL,
+        .sec_write.specific_session_mask = UDS_CFG_SESSION_MASK_ALL,
+
+        .cb_download_request = mem_region_download_request,
+        .cb_download         = mem_region_download,
+        .cb_download_exit    = mem_region_download_exit,
+        .sec_download.sa_type_mask = UDS_CFG_SA_TYPE_NONE,
+        .sec_download.standard_session_mask = UDS_CFG_SESSION_MASK_ALL,
+        .sec_download.specific_session_mask = UDS_CFG_SESSION_MASK_ALL,
+    }
+};
+
+static char buf_filepath[4096];
+static size_t cur_offset = 0;
+
+static int file_transfer_open(void *priv, const char *filepath, size_t filepath_len,
+                              uds_file_mode_e mode, intptr_t *fd, size_t *max_block_len)
+{
+    int tmp_fd = -1;
+    int ret = 0;
+
+    memcpy(buf_filepath, filepath, filepath_len);
+    buf_filepath[filepath_len] = '\0';
+
+    if (mode == UDS_FILE_MODE_READ)
+    {
+        tmp_fd = open(buf_filepath, O_RDONLY);
+    }
+    else if (mode == UDS_FILE_MODE_WRITE_CREATE)
+    {
+        tmp_fd = open(buf_filepath, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    }
+    else if (mode == UDS_FILE_MODE_WRITE_REPLACE)
+    {
+        tmp_fd = open(buf_filepath, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    }
+
+    if (tmp_fd < 0)
+    {
+        ret = -1;
+    }
+    else
+    {
+        *fd = tmp_fd;
+        *max_block_len = 512;
+
+        cur_offset = 0;
+    }
+
+    return ret;
+}
+
+static int file_transfer_read(void *priv, intptr_t fd, size_t offset, void *buf, size_t count)
+{
+    int ret = 0;
+
+    if (cur_offset != offset)
+    {
+        ret = lseek(fd, offset, SEEK_SET);
+    }
+
+    if (ret == 0)
+    {
+        ret = read(fd, buf, count);
+        if (ret == count)
+        {
+            cur_offset = (offset + count);
+            ret = 0;
+        }
+    }
+
+    return ret;
+}
+
+static int file_transfer_write(void *priv, intptr_t fd, size_t offset, const void *buf, size_t count)
+{
+    int ret = 0;
+
+    if (cur_offset != offset)
+    {
+        ret = lseek(fd, offset, SEEK_SET);
+    }
+
+    if (ret == 0)
+    {
+        ret = write(fd, buf, count);
+        if (ret == count)
+        {
+            cur_offset = (offset + count);
+            ret = 0;
+        }
+    }
+
+    return ret;
+}
+
+static int file_transfer_close(void *priv, intptr_t fd)
+{
+    close(fd);
+    return 0;
+}
+
+static int file_transfer_delete(void *priv, const char *filepath, size_t filepath_len)
+{
+    memcpy(buf_filepath, filepath, filepath_len);
+    buf_filepath[filepath_len] = '\0';
+
+    return unlink(buf_filepath);
+}
+
 static const uds_config_t uds_config =
 {
-    .p2 = 250,
-    .p2max = 2000,
+    .p2 = 2500,
+    .p2max = 20000,
 
     .session_config = uds_sessions,
     .num_session_config = sizeof(uds_sessions) / sizeof(uds_session_cfg_t),
@@ -409,6 +568,19 @@ static const uds_config_t uds_config =
 
     .data_items = data_items,
     .num_data_items = sizeof(data_items) / sizeof(uds_config_data_t),
+
+    .mem_regions = mem_regions,
+    .num_mem_regions = sizeof(mem_regions) / sizeof(uds_config_memory_region_t),
+
+    .file_transfer =
+    {
+        .cb_open = file_transfer_open,
+        .cb_write = file_transfer_write,
+        .cb_close = file_transfer_close,
+        .sec.sa_type_mask = UDS_CFG_SA_TYPE_NONE,
+        .sec.standard_session_mask = UDS_CFG_SESSION_MASK_ALL,
+        .sec.specific_session_mask = UDS_CFG_SESSION_MASK_ALL,
+    },
 
     .dtc_information =
     {

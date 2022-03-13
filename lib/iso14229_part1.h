@@ -180,6 +180,13 @@
 #define UDS_LEV_RCTP_STPR       0x02 // Stop Routine
 #define UDS_LEV_RCTP_RRR        0x03 // Request Routine Results
 
+// Mode Of Operation types (actions for UDS_SVC_RFT)
+#define UDS_MOOP_ADDFILE        0x01 // Add File (download to ECU)
+#define UDS_MOOP_DELFILE        0x02 // Delete File
+#define UDS_MOOP_REPLFILE       0x03 // Replace File (download to ECU, replace if existent)
+#define UDS_MOOP_RDFILE         0x04 // Read File (upload from ECU)
+#define UDS_MOOP_RDDIR          0x05 // Read Directory
+
 // Zero Sub-Function (sub-function of UDS_SVC_TP)
 #define UDS_LEV_ZSUBF           0x00 // Zero Sub-Function
 

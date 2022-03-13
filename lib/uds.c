@@ -18,11 +18,33 @@
 #define __UDS_INVALID_DATA_IDENTIFIER 0xFFFF
 #define __UDS_INVALID_GROUP_OF_DTC 0x00000000
 
+#define __UDS_FILEPATH_MAX 4096
+
 static const uds_session_cfg_t __uds_default_session =
 {
     .session_type = 0x01,
     .sa_type_mask = 0UL,
 };
+
+static inline void __uds_store_big_endian(uint8_t *dest, unsigned long long value, size_t num_bytes)
+{
+    unsigned long p;
+    for (p = 0; p < num_bytes; p++)
+    {
+        dest[p] = (value >> (8 * (num_bytes - p - 1))) & 0xFF;
+    }
+}
+
+static inline unsigned long long __uds_load_big_endian(const uint8_t *src, size_t num_bytes)
+{
+    unsigned long long val = 0;
+    unsigned long p;
+    for (p = 0; p < num_bytes; p++)
+    {
+        val |= (0xFFULL & src[p]) << (8 * (num_bytes - p - 1));
+    }
+    return val;
+}
 
 static inline uint8_t __uds_sat_to_sa_index(const uint8_t sat)
 {
@@ -163,22 +185,26 @@ static inline int __uds_data_transfer_active(uds_context_t *ctx)
 {
     int ret = -1;
 
-    if ((UDS_DATA_TRANSFER_NONE != ctx->data_transfer.direction) &&
-        (NULL != ctx->data_transfer.mem_region))
+    if (UDS_DATA_TRANSFER_NONE != ctx->data_transfer.direction)
     {
         ret = 0;
     }
+
+    uds_info(ctx, "__uds_data_transfer_active -> %d\n", ret);
 
     return ret;
 }
 
 static inline void __uds_data_transfer_reset(uds_context_t *ctx)
 {
+    uds_info(ctx, "data transfer reset\n");
+
     ctx->data_transfer.direction = UDS_DATA_TRANSFER_NONE;
     ctx->data_transfer.mem_region = NULL;
     ctx->data_transfer.address = NULL;
     ctx->data_transfer.prev_address = NULL;
     ctx->data_transfer.bsqc = 0;
+    ctx->data_transfer.file_fd = -1;
 }
 
 static int __uds_send(uds_context_t *ctx, const uint8_t *data, size_t len)
@@ -2297,13 +2323,11 @@ static uint8_t __uds_svc_request_download(uds_context_t *ctx,
                                  * including the service identifier and the data-parameters */
                                 size_len = sizeof(size_t);
                                 res_data[0] = (size_len & 0xF) << 4;
-                                for (p = size_len; p > 0; p--)
-                                {
-                                    res_data[p] = ((ctx->data_transfer.max_block_len + 2) >> (8 * (p - 1))) & 0xFF;
-                                }
+                                __uds_store_big_endian(&res_data[1], (ctx->data_transfer.max_block_len + 2), size_len);
                                 *res_data_len = (1 + size_len);
                                 nrc = UDS_NRC_PR;
 
+                                __uds_data_transfer_reset(ctx);
                                 ctx->data_transfer.direction = UDS_DATA_TRANSFER_DOWNLOAD;
                                 ctx->data_transfer.mem_region = &ctx->config->mem_regions[p];
                                 /* Block sequence counter starts from 1 */
@@ -2445,13 +2469,11 @@ static uint8_t __uds_svc_request_upload(uds_context_t *ctx,
                                  * including the service identifier and the data-parameters */
                                 size_len = sizeof(size_t);
                                 res_data[0] = (size_len & 0xF) << 4;
-                                for (p = size_len; p > 0; p--)
-                                {
-                                    res_data[p] = ((ctx->data_transfer.max_block_len + 2) >> (8 * (p - 1))) & 0xFF;
-                                }
+                                __uds_store_big_endian(&res_data[1], (ctx->data_transfer.max_block_len + 2), size_len);
                                 *res_data_len = (1 + size_len);
                                 nrc = UDS_NRC_PR;
 
+                                __uds_data_transfer_reset(ctx);
                                 ctx->data_transfer.direction = UDS_DATA_TRANSFER_UPLOAD;
                                 ctx->data_transfer.mem_region = &ctx->config->mem_regions[p];
                                 /* Block sequence counter starts from 1 */
@@ -2481,15 +2503,28 @@ static uint8_t __uds_transmit_data_download(uds_context_t *ctx, uint8_t bsqc,
     uint8_t nrc = UDS_NRC_GR;
     int ret;
 
+    uds_debug(ctx, "data download bsqc = 0x%02X len = %lu\n", bsqc, data_len);
+
     if (data_len > ctx->data_transfer.max_block_len)
     {
         nrc = UDS_NRC_ROOR;
     }
     else if (bsqc == ctx->data_transfer.bsqc)
     {
-        ret = ctx->data_transfer.mem_region->cb_download(ctx->priv,
-                                                         ctx->data_transfer.address,
-                                                         data, data_len);
+        if (ctx->data_transfer.direction == UDS_DATA_TRANSFER_DOWNLOAD_FILE)
+        {
+            ret = ctx->config->file_transfer.cb_write(ctx->priv,
+                                                      ctx->data_transfer.file_fd,
+                                                      (size_t)ctx->data_transfer.address,
+                                                      data, data_len);
+        }
+        else
+        {
+            ret = ctx->data_transfer.mem_region->cb_download(ctx->priv,
+                                                             ctx->data_transfer.address,
+                                                             data, data_len);
+        }
+
         if (ret != 0)
         {
             uds_err(ctx, "download of block %u failed (address %p, size %lu)\n",
@@ -2595,7 +2630,8 @@ static uint8_t __uds_svc_transmit_data(uds_context_t *ctx,
 
     __UDS_UNUSED(timestamp);
 
-    if (UDS_DATA_TRANSFER_DOWNLOAD == ctx->data_transfer.direction)
+    if ((UDS_DATA_TRANSFER_DOWNLOAD == ctx->data_transfer.direction) ||
+        (UDS_DATA_TRANSFER_DOWNLOAD_FILE == ctx->data_transfer.direction))
     {
         if (data_len < 2)
         {
@@ -2671,9 +2707,370 @@ static uint8_t __uds_svc_request_transfer_exit(uds_context_t *ctx,
         }
         __uds_data_transfer_reset(ctx);
     }
+    else if (UDS_DATA_TRANSFER_DOWNLOAD_FILE == ctx->data_transfer.direction)
+    {
+        nrc = UDS_NRC_PR;
+        if (NULL != ctx->config->file_transfer.cb_close)
+        {
+            ret = ctx->config->file_transfer.cb_close(ctx->priv,
+                                                      ctx->data_transfer.file_fd);
+            if (ret != 0)
+            {
+                uds_err(ctx, "file download close failed\n");
+                nrc = UDS_NRC_GPF;
+            }
+        }
+        __uds_data_transfer_reset(ctx);
+    }
+    else if (UDS_DATA_TRANSFER_UPLOAD_FILE == ctx->data_transfer.direction)
+    {
+        nrc = UDS_NRC_PR;
+        if (NULL != ctx->config->file_transfer.cb_close)
+        {
+            ret = ctx->config->file_transfer.cb_close(ctx->priv,
+                                                      ctx->data_transfer.file_fd);
+            if (ret != 0)
+            {
+                uds_err(ctx, "file upload close failed\n");
+                nrc = UDS_NRC_GPF;
+            }
+        }
+        __uds_data_transfer_reset(ctx);
+    }
     else
     {
         nrc = UDS_NRC_RSE;
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_file_transfer_addfile(uds_context_t *ctx,
+                                           const uint8_t *data, size_t data_len,
+                                           uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_SFNS;
+
+    const char *file_path = NULL;
+    size_t file_path_len = 0xFFFF;
+    uint8_t data_format_identifier = 0xFF;
+    uint8_t filesize_param_len = 0xFF;
+    size_t filesize_uncompressed = 0ULL;
+    size_t filesize_compressed = 0ULL;
+
+    if ((NULL == ctx->config->file_transfer.cb_open) ||
+        (NULL == ctx->config->file_transfer.cb_write))
+    {
+        uds_debug(ctx, "cb_open or cb_write not defined\n");
+        nrc = UDS_NRC_SFNS;
+    }
+    else if (data_len < 5)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        file_path_len = ((0x00FF & data[1]) << 8) | data[2];
+        if (data_len < (5 + file_path_len))
+        {
+            nrc = UDS_NRC_IMLOIF;
+        }
+        else if (file_path_len > __UDS_FILEPATH_MAX)
+        {
+            nrc = UDS_NRC_ROOR;
+        }
+        else
+        {
+            filesize_param_len = data[3 + file_path_len + 1];
+            if (data_len < (5 + file_path_len + 2 * (filesize_param_len)))
+            {
+                nrc = UDS_NRC_IMLOIF;
+            }
+            else if (filesize_param_len > sizeof(size_t))
+            {
+                nrc = UDS_NRC_ROOR;
+            }
+            else
+            {
+                intptr_t file_fd = -1;
+                int ret = -1;
+
+                /* NOTE: file_path might not be zero-terminated */
+                file_path = (const char *)&data[3];
+                data_format_identifier = data[3 + file_path_len];
+
+                /* Extract sizes from incoming data */
+                filesize_uncompressed = __uds_load_big_endian(&data[4 + file_path_len],
+                                                              filesize_param_len);
+
+                filesize_compressed = __uds_load_big_endian(&data[4 + file_path_len + filesize_param_len],
+                                                            filesize_param_len);
+
+                uds_debug(ctx, "add file at %.*s, size %lu (%lu cmp), dfi=0x%02X\n",
+                          (int)file_path_len, file_path,
+                          filesize_uncompressed, filesize_compressed,
+                          data_format_identifier);
+
+                ret = ctx->config->file_transfer.cb_open(ctx->priv,
+                                                         file_path, file_path_len,
+                                                         UDS_FILE_MODE_WRITE_CREATE,
+                                                         &file_fd,
+                                                         &ctx->data_transfer.max_block_len);
+                if (ret < 0)
+                {
+                    uds_err(ctx, "failed to open file %.*s for writing\n",
+                            (int)file_path_len, file_path);
+                    nrc = UDS_NRC_UDNA;
+                }
+                else
+                {
+                    const uint8_t size_len = sizeof(size_t);
+
+                    res_data[0] = data[0];
+                    /* The max_block_len length reflects the complete message length,
+                     * including the service identifier and the data-parameters */
+                    res_data[1] = size_len;
+                    __uds_store_big_endian(&res_data[2], (ctx->data_transfer.max_block_len + 2), size_len);
+                    res_data[2 + size_len] = data_format_identifier;
+                    *res_data_len = (3 + size_len);
+                    nrc = UDS_NRC_PR;
+
+                    __uds_data_transfer_reset(ctx);
+                    ctx->data_transfer.direction = UDS_DATA_TRANSFER_DOWNLOAD_FILE;
+                    ctx->data_transfer.file_fd = file_fd;
+                    /* Block sequence counter starts from 1 */
+                    ctx->data_transfer.bsqc = 0x01;
+                }
+            }
+        }
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_file_transfer_delfile(uds_context_t *ctx,
+                                           const uint8_t *data, size_t data_len,
+                                           uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_SFNS;
+
+    const char *file_path = NULL;
+    size_t file_path_len = 0xFFFF;
+
+    if (NULL == ctx->config->file_transfer.cb_delete)
+    {
+        uds_debug(ctx, "cb_delete not defined\n");
+        nrc = UDS_NRC_SFNS;
+    }
+    else if (data_len < 5)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        file_path_len = ((0x00FF & data[1]) << 8) | data[2];
+        if (data_len < (5 + file_path_len))
+        {
+            nrc = UDS_NRC_IMLOIF;
+        }
+        else if (file_path_len > __UDS_FILEPATH_MAX)
+        {
+            nrc = UDS_NRC_ROOR;
+        }
+        else
+        {
+            int ret;
+
+            /* NOTE: file_path might not be zero-terminated */
+            file_path = (const char *)&data[3];
+
+            uds_debug(ctx, "delete file at %.*s\n",
+                          (int)file_path_len, file_path);
+
+            ret = ctx->config->file_transfer.cb_delete(ctx->priv,
+                                                       file_path, file_path_len);
+            if (ret < 0)
+            {
+                uds_err(ctx, "failed to delete file %.*s\n",
+                        (int)file_path_len, file_path);
+                nrc = UDS_NRC_UDNA;
+            }
+            else
+            {
+                nrc = UDS_NRC_PR;
+                res_data[0] = data[0];
+                *res_data_len = 1;
+            }
+        }
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_file_transfer_replfile(uds_context_t *ctx,
+                                            const uint8_t *data, size_t data_len,
+                                            uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_SFNS;
+
+    const char *file_path = NULL;
+    size_t file_path_len = 0xFFFF;
+    uint8_t data_format_identifier = 0xFF;
+    uint8_t filesize_param_len = 0xFF;
+    size_t filesize_uncompressed = 0ULL;
+    size_t filesize_compressed = 0ULL;
+
+    if ((NULL == ctx->config->file_transfer.cb_open) ||
+        (NULL == ctx->config->file_transfer.cb_write))
+    {
+        uds_debug(ctx, "cb_open or cb_write not defined\n");
+        nrc = UDS_NRC_SFNS;
+    }
+    else if (data_len < 5)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        file_path_len = ((0x00FF & data[1]) << 8) | data[2];
+        if (data_len < (5 + file_path_len))
+        {
+            nrc = UDS_NRC_IMLOIF;
+        }
+        else if (file_path_len > __UDS_FILEPATH_MAX)
+        {
+            nrc = UDS_NRC_ROOR;
+        }
+        else
+        {
+            filesize_param_len = data[3 + file_path_len + 1];
+            if (data_len < (5 + file_path_len + 2 * (filesize_param_len)))
+            {
+                nrc = UDS_NRC_IMLOIF;
+            }
+            else if (filesize_param_len > sizeof(size_t))
+            {
+                nrc = UDS_NRC_ROOR;
+            }
+            else
+            {
+                intptr_t file_fd = -1;
+                int ret = -1;
+
+                /* NOTE: file_path might not be zero-terminated */
+                file_path = (const char *)&data[3];
+                data_format_identifier = data[3 + file_path_len];
+
+                /* Extract sizes from incoming data */
+                filesize_uncompressed = __uds_load_big_endian(&data[4 + file_path_len],
+                                                              filesize_param_len);
+
+                filesize_compressed = __uds_load_big_endian(&data[4 + file_path_len + filesize_param_len],
+                                                              filesize_param_len);
+
+                uds_debug(ctx, "replace file at %.*s, size %lu (%lu cmp), dfi=0x%02X\n",
+                          (int)file_path_len, file_path,
+                          filesize_uncompressed, filesize_compressed,
+                          data_format_identifier);
+
+                ret = ctx->config->file_transfer.cb_open(ctx->priv,
+                                                         file_path, file_path_len,
+                                                         UDS_FILE_MODE_WRITE_REPLACE,
+                                                         &file_fd,
+                                                         &ctx->data_transfer.max_block_len);
+                if (ret < 0)
+                {
+                    uds_err(ctx, "failed to open file %.*s for writing\n",
+                            (int)file_path_len, file_path);
+                    nrc = UDS_NRC_UDNA;
+                }
+                else
+                {
+                    const uint8_t size_len = sizeof(size_t);
+
+                    res_data[0] = data[0];
+                    /* The max_block_len length reflects the complete message length,
+                     * including the service identifier and the data-parameters */
+                    res_data[1] = size_len;
+                    __uds_store_big_endian(&res_data[2], (ctx->data_transfer.max_block_len + 2), size_len);
+                    res_data[2 + size_len] = data_format_identifier;
+                    *res_data_len = (3 + size_len);
+                    nrc = UDS_NRC_PR;
+
+                    __uds_data_transfer_reset(ctx);
+                    ctx->data_transfer.direction = UDS_DATA_TRANSFER_DOWNLOAD_FILE;
+                    ctx->data_transfer.file_fd = file_fd;
+                    /* Block sequence counter starts from 1 */
+                    ctx->data_transfer.bsqc = 0x01;
+                }
+            }
+        }
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_file_transfer_rdfile(uds_context_t *ctx,
+                                          const uint8_t *data, size_t data_len,
+                                          uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_SFNS;
+
+    return nrc;
+}
+
+static uint8_t __uds_file_transfer_rddir(uds_context_t *ctx,
+                                         const uint8_t *data, size_t data_len,
+                                         uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_SFNS;
+
+    return nrc;
+}
+
+static uint8_t __uds_svc_request_file_transfer(uds_context_t *ctx,
+                                               const struct timespec *timestamp,
+                                               const uint8_t *data, size_t data_len,
+                                               uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint8_t mode_of_operation = 0xFF;
+
+    __UDS_UNUSED(timestamp);
+
+    if (data_len < 4)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        mode_of_operation = data[0];
+
+        switch (mode_of_operation)
+        {
+        case UDS_MOOP_ADDFILE:
+            nrc = __uds_file_transfer_addfile(ctx, data, data_len,
+                                              res_data, res_data_len);
+            break;
+        case UDS_MOOP_DELFILE:
+            nrc = __uds_file_transfer_delfile(ctx, data, data_len,
+                                              res_data, res_data_len);
+            break;
+        case UDS_MOOP_REPLFILE:
+            nrc = __uds_file_transfer_replfile(ctx, data, data_len,
+                                               res_data, res_data_len);
+            break;
+        case UDS_MOOP_RDFILE:
+            nrc = __uds_file_transfer_rdfile(ctx, data, data_len,
+                                             res_data, res_data_len);
+            break;
+        case UDS_MOOP_RDDIR:
+            nrc = __uds_file_transfer_rddir(ctx, data, data_len,
+                                            res_data, res_data_len);
+            break;
+        default:
+            nrc = UDS_NRC_ROOR;
+        }
     }
 
     return nrc;
@@ -2812,6 +3209,8 @@ static int __uds_process_service(uds_context_t *ctx,
         break;
 
     case UDS_SVC_RFT:
+        nrc = __uds_svc_request_file_transfer(ctx, timestamp, data, data_len,
+                                              res_data, &res_data_len);
         break;
 
     default:
@@ -2840,7 +3239,8 @@ static int __uds_process_service(uds_context_t *ctx,
             ctx->response_buffer[0] = UDS_NR_SI;
             ctx->response_buffer[1] = service;
             ctx->response_buffer[2] = nrc;
-            uds_debug(ctx, "send negative response code 0x%02X\n", nrc);
+            uds_debug(ctx, "send negative response code 0x%02X to service 0x%02X\n",
+                      nrc, service);
             ret = __uds_send(ctx, ctx->response_buffer, 3);
         }
     }
@@ -3023,7 +3423,7 @@ int uds_cycle(uds_context_t *ctx, const struct timespec *timestamp)
                 __uds_reset_secure_access(ctx);
             }
 
-            if (__uds_data_transfer_active(ctx))
+            if (__uds_data_transfer_active(ctx) == 0)
             {
                 if ((UDS_DATA_TRANSFER_DOWNLOAD == ctx->data_transfer.direction) &&
                     (__uds_session_and_security_check(ctx, &ctx->data_transfer.mem_region->sec_download) != 0))
@@ -3032,6 +3432,16 @@ int uds_cycle(uds_context_t *ctx, const struct timespec *timestamp)
                 }
                 else if ((UDS_DATA_TRANSFER_UPLOAD == ctx->data_transfer.direction) &&
                          (__uds_session_and_security_check(ctx, &ctx->data_transfer.mem_region->sec_upload) != 0))
+                {
+                    __uds_data_transfer_reset(ctx);
+                }
+                else if ((UDS_DATA_TRANSFER_DOWNLOAD_FILE == ctx->data_transfer.direction) &&
+                         (__uds_session_and_security_check(ctx, &ctx->config->file_transfer.sec) != 0))
+                {
+                    __uds_data_transfer_reset(ctx);
+                }
+                else if ((UDS_DATA_TRANSFER_UPLOAD_FILE == ctx->data_transfer.direction) &&
+                         (__uds_session_and_security_check(ctx, &ctx->config->file_transfer.sec) != 0))
                 {
                     __uds_data_transfer_reset(ctx);
                 }

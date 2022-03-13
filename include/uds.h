@@ -195,6 +195,12 @@ typedef enum {
     UDS_DTC_FORMAT_SAE_J2012_DA_04  = 0x04,
 } uds_dtc_format_identifier_e;
 
+typedef enum {
+    UDS_FILE_MODE_READ = 0,
+    UDS_FILE_MODE_WRITE_CREATE = 1,
+    UDS_FILE_MODE_WRITE_REPLACE = 1,
+} uds_file_mode_e;
+
 typedef struct __uds_security_cfg
 {
     uint64_t standard_session_mask;
@@ -356,6 +362,22 @@ typedef struct __uds_config_dtc_information
 
 } uds_config_dtc_information_t;
 
+typedef struct __uds_config_file_access
+{
+    int (*cb_open)(void *priv, const char *filepath, size_t filepath_len,
+                   uds_file_mode_e mode, intptr_t *fd, size_t *max_block_len);
+
+    int (*cb_read)(void *priv, intptr_t fd, size_t offset, void *buf, size_t count);
+
+    int (*cb_write)(void *priv, intptr_t fd, size_t offset, const void *buf, size_t count);
+
+    int (*cb_close)(void *priv, intptr_t fd);
+
+    int (*cb_delete)(void *priv, const char *filepath, size_t filepath_len);
+
+    uds_security_cfg_t sec;
+} uds_config_file_access_t;
+
 typedef struct __uds_config_routine
 {
     uint16_t identifier;
@@ -408,6 +430,8 @@ typedef struct __uds_config
 
     const uds_config_dtc_information_t dtc_information;
 
+    const uds_config_file_access_t file_transfer;
+
     const uds_config_routine_t *routines;
     unsigned long num_routines;
 } uds_config_t;
@@ -417,6 +441,8 @@ typedef enum __uds_data_transfer_dir
     UDS_DATA_TRANSFER_NONE,
     UDS_DATA_TRANSFER_DOWNLOAD,
     UDS_DATA_TRANSFER_UPLOAD,
+    UDS_DATA_TRANSFER_DOWNLOAD_FILE,
+    UDS_DATA_TRANSFER_UPLOAD_FILE,
 } uds_data_transfer_dir_e;
 
 typedef struct __uds_context
@@ -441,6 +467,7 @@ typedef struct __uds_context
         uint8_t bsqc;
         void *prev_address;
         void *address;
+        intptr_t file_fd;
     } data_transfer;
 
     uint8_t *response_buffer;
