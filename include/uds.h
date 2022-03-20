@@ -294,31 +294,31 @@ typedef struct __uds_config_data
 
 typedef struct __uds_config_memory_region
 {
-    const void *start;
-    const void *stop;
+    const uintptr_t start;
+    const uintptr_t stop;
 
-    int (*cb_read)(void *priv, const void *address,
+    int (*cb_read)(void *priv, const uintptr_t address,
                    uint8_t *data, const size_t data_len);
     uds_security_cfg_t sec_read;
 
-    int (*cb_write)(void *priv, const void *address,
+    int (*cb_write)(void *priv, const uintptr_t address,
                     const uint8_t *data, const size_t data_len);
     uds_security_cfg_t sec_write;
 
-    int (*cb_download_request)(void *priv, const void *address,
+    int (*cb_download_request)(void *priv, const uintptr_t address,
                                const size_t data_len,
                                const uint8_t compression_method,
                                const uint8_t encrypting_method);
-    int (*cb_download)(void *priv, const void *address,
+    int (*cb_download)(void *priv, const uintptr_t address,
                        const uint8_t *data, const size_t data_len);
     int (*cb_download_exit)(void *priv);
     uds_security_cfg_t sec_download;
 
-    int (*cb_upload_request)(void *priv, const void *address,
+    int (*cb_upload_request)(void *priv, const uintptr_t address,
                              const size_t data_len,
                              const uint8_t compression_method,
                              const uint8_t encrypting_method);
-    int (*cb_upload)(void *priv, const void *address,
+    int (*cb_upload)(void *priv, const uintptr_t address,
                      uint8_t *data, size_t *data_len);
     int (*cb_upload_exit)(void *priv);
     uds_security_cfg_t sec_upload;
@@ -475,8 +475,8 @@ typedef struct __uds_context
         const uds_config_memory_region_t *mem_region;
         size_t max_block_len;
         uint8_t bsqc;
-        void *prev_address;
-        void *address;
+        uintptr_t prev_address;
+        uintptr_t address;
         intptr_t fd;
     } data_transfer;
 

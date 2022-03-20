@@ -17,6 +17,8 @@
 #define __UDS_HIGH_NIBBLE(b)    ((b>>4)&0xF)
 #define __UDS_LOW_NIBBLE(b)     (b&0xF)
 
+#define __UDS_FROM_NIBBLES(low,high) (((high&0xF)<<4)|(low%0xF))
+
 #define __UDS_INVALID_SA_INDEX 0xFF
 #define __UDS_INVALID_DATA_IDENTIFIER 0xFFFF
 #define __UDS_INVALID_GROUP_OF_DTC 0x00000000
@@ -38,6 +40,8 @@ static inline void __uds_store_big_endian(uint8_t *dest, unsigned long long valu
     }
 }
 
+#define __UDS_LOAD_UINT16_BIG_ENDIAN(d) (((0x00FF&(d)[0]) << 8)|(d)[1])
+
 static inline unsigned long long __uds_load_big_endian(const uint8_t *src, size_t num_bytes)
 {
     unsigned long long val = 0;
@@ -47,6 +51,54 @@ static inline unsigned long long __uds_load_big_endian(const uint8_t *src, size_
         val |= (0xFFULL & src[p]) << (8 * (num_bytes - p - 1));
     }
     return val;
+}
+
+static inline int __uds_load_big_endian_addr(const uint8_t *src, size_t num_bytes, uintptr_t *addr)
+{
+    uintptr_t val = 0;
+    int ret = 0;
+    unsigned long p;
+    for (p = 0; p < num_bytes; p++)
+    {
+        if (p <= sizeof(uintptr_t))
+        {
+            val |= (0xFFULL & src[p]) << (8 * (num_bytes - p - 1));
+        }
+        else if (src[p] != 0)
+        {
+            ret = -1;
+            break;
+        }
+    }
+    if (ret == 0)
+    {
+        *addr = val;
+    }
+    return ret;
+}
+
+static inline int __uds_load_big_endian_size(const uint8_t *src, size_t num_bytes, size_t *size)
+{
+    size_t val = 0;
+    int ret = 0;
+    unsigned long p;
+    for (p = 0; p < num_bytes; p++)
+    {
+        if (p <= sizeof(size_t))
+        {
+            val |= (0xFFULL & src[p]) << (8 * (num_bytes - p - 1));
+        }
+        else if (src[p] != 0)
+        {
+            ret = -1;
+            break;
+        }
+    }
+    if (ret == 0)
+    {
+        *size = val;
+    }
+    return ret;
 }
 
 static inline uint8_t __uds_sat_to_sa_index(const uint8_t sat)
@@ -127,10 +179,9 @@ static int __uds_session_check(uds_context_t *ctx, const uds_security_cfg_t* cfg
 {
     int ret = -1;
 
-    uds_debug(ctx, "session_check with active session = 0x%02X\n",
-              ctx->current_session->session_type);
-    uds_debug(ctx, "standard_sm = 0x%016lX\n", cfg->standard_session_mask);
-    uds_debug(ctx, "specific_sm = 0x%016lX\n", cfg->specific_session_mask);
+    uds_debug(ctx, "session_check with active session = 0x%02X (st = 0x%016lX, sp = 0x%016lX)\n",
+              ctx->current_session->session_type,
+              cfg->standard_session_mask, cfg->specific_session_mask);
 
     if (ctx->current_session->session_type >= 128)
     {
@@ -202,8 +253,8 @@ static inline void __uds_data_transfer_reset(uds_context_t *ctx)
 
     ctx->data_transfer.direction = UDS_DATA_TRANSFER_NONE;
     ctx->data_transfer.mem_region = NULL;
-    ctx->data_transfer.address = NULL;
-    ctx->data_transfer.prev_address = NULL;
+    ctx->data_transfer.address = 0;
+    ctx->data_transfer.prev_address = 0U;
     ctx->data_transfer.bsqc = 0;
     ctx->data_transfer.fd = -1;
     ctx->data_transfer.max_block_len = 0;
@@ -284,10 +335,8 @@ static uint8_t __uds_svc_session_control(uds_context_t *ctx,
         {
             nrc = UDS_NRC_PR;
             res_data[0] = requested_session;
-            res_data[1] = ((ctx->config->session_config[s].p2_timeout_ms >> 8) & 0xFF);
-            res_data[2] = ((ctx->config->session_config[s].p2_timeout_ms >> 0) & 0xFF);
-            res_data[3] = ((ctx->config->session_config[s].p2star_timeout_ms >> 8) & 0xFF);
-            res_data[4] = ((ctx->config->session_config[s].p2star_timeout_ms >> 0) & 0xFF);
+            __uds_store_big_endian(&res_data[1], ctx->config->session_config[s].p2_timeout_ms, 2);
+            __uds_store_big_endian(&res_data[3], ctx->config->session_config[s].p2star_timeout_ms, 2);
             *res_data_len = 5;
         }
     }
@@ -854,7 +903,7 @@ static uint8_t __uds_svc_read_data_by_identifier(uds_context_t *ctx,
         nrc = UDS_NRC_PR;
         for (data_start = 0; data_start < data_len; data_start += 2)
         {
-            identifier = (data[data_start] << 8) | (data[data_start + 1] << 0);
+            identifier = __UDS_LOAD_UINT16_BIG_ENDIAN(&data[data_start]);
 
             uds_debug(ctx, "requested to read DID 0x%04X\n", identifier);
 
@@ -886,8 +935,7 @@ static uint8_t __uds_svc_read_data_by_identifier(uds_context_t *ctx,
                     }
                     else
                     {
-                        res_data[res_data_used] = (identifier >> 8) & 0xFF;
-                        res_data[res_data_used + 1] = (identifier >> 0) & 0xFF;
+                        __uds_store_big_endian(&res_data[res_data_used], identifier, 2);
                         res_data_used += 2;
                         res_data_item_len = *res_data_len - res_data_used;
                         ret = ctx->config->data_items[d].cb_read(ctx->priv, identifier,
@@ -946,7 +994,7 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
     uint8_t nrc = UDS_NRC_GR;
     uint8_t addr_len = 0;
     uint8_t size_len = 0;
-    void * addr = 0;
+    uintptr_t addr = 0;
     size_t size = 0;
     unsigned long p = 0;
     int ret;
@@ -959,8 +1007,8 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
     }
     else
     {
-        addr_len = (data[0] >> 0) & 0x0F;
-        size_len = (data[0] >> 4) & 0x0F;
+        addr_len = __UDS_LOW_NIBBLE(data[0]);
+        size_len = __UDS_HIGH_NIBBLE(data[0]);
 
         if ((1U + addr_len + size_len) > data_len)
         {
@@ -970,34 +1018,16 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
         {
             nrc = UDS_NRC_PR;
 
-            /* Extract address from incoming data; p starts at addr_len because
-             * address is stored inside data[] starting from data[1] */
-            for (p = addr_len; p > 0; p--)
+            ret = __uds_load_big_endian_addr(&data[1], addr_len, &addr);
+            if (ret != 0)
             {
-                if (p <= sizeof(void*))
-                {
-                    addr = (void *)((uintptr_t)addr | ((0xFFULL & data[p]) << (8 * (addr_len - p))));
-                }
-                else if (data[p] != 0x00)
-                {
-                    nrc = UDS_NRC_ROOR;
-                    break;
-                }
+                nrc = UDS_NRC_ROOR;
             }
 
-            /* Extract size from incoming data; p starts at size_len because
-             * address is stored inside data[] starting from data[1] */
-            for (p = size_len; p > 0; p--)
+            ret = __uds_load_big_endian_size(&data[1 + addr_len], size_len, &size);
+            if (ret != 0)
             {
-                if (p <= sizeof(size_t))
-                {
-                    size |= ((0xFFUL & data[addr_len + p]) << (8 * (size_len - p)));
-                }
-                else if (data[addr_len + p] != 0x00)
-                {
-                    nrc = UDS_NRC_ROOR;
-                    break;
-                }
+                nrc = UDS_NRC_ROOR;
             }
 
             if (UDS_NRC_PR != nrc)
@@ -1007,12 +1037,12 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
             }
             else if (size == 0)
             {
-                uds_info(ctx, "request read of memory at %p with null size\n", addr);
+                uds_info(ctx, "request read of memory at %p with null size\n", (void *)addr);
                 nrc = UDS_NRC_ROOR;
             }
             else
             {
-                uds_debug(ctx, "request to read memory at %p, size %lu\n", addr, size);
+                uds_debug(ctx, "request to read memory at %p, size %lu\n", (void *)addr, size);
 
                 for (p = 0; p < ctx->config->num_mem_regions; p++)
                 {
@@ -1039,7 +1069,7 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
                                                                       &res_data[0], size);
                             if (ret != 0)
                             {
-                                uds_err(ctx, "failed to read memory at %p, len = %lu\n", addr, size);
+                                uds_err(ctx, "failed to read memory at %p, len = %lu\n", (void *)addr, size);
                                 nrc = UDS_NRC_GR;
                             }
                             else
@@ -1054,7 +1084,7 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
 
                 if (p == ctx->config->num_mem_regions)
                 {
-                    uds_debug(ctx, "memory address %p non found in any region\n", addr);
+                    uds_debug(ctx, "memory address %p non found in any region\n", (void *)addr);
                     nrc = UDS_NRC_ROOR;
                 }
             }
@@ -1081,7 +1111,7 @@ static uint8_t __uds_svc_read_scaling_data_by_identifier(uds_context_t *ctx,
     }
     else
     {
-        identifier = (data[0] << 8) | (data[1] << 0);
+        identifier = __UDS_LOAD_UINT16_BIG_ENDIAN(&data[0]);
 
         uds_debug(ctx, "requested to read scaling data for DID 0x%04X\n", identifier);
 
@@ -1117,8 +1147,7 @@ static uint8_t __uds_svc_read_scaling_data_by_identifier(uds_context_t *ctx,
                 else
                 {
                     nrc = UDS_NRC_PR;
-                    res_data[0] = (identifier >> 8) & 0xFF;
-                    res_data[1] = (identifier >> 0) & 0xFF;
+                    __uds_store_big_endian(&res_data[0], identifier, 2);
                     memcpy(&res_data[2],
                            ctx->config->data_items[d].scaling_data,
                            ctx->config->data_items[d].scaling_data_size);
@@ -1150,7 +1179,7 @@ static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
     }
     else
     {
-        identifier = (data[0] << 8) | (data[1] << 0);
+        identifier = __UDS_LOAD_UINT16_BIG_ENDIAN(&data[0]);
 
         uds_debug(ctx, "requested to write DID 0x%04X\n", identifier);
 
@@ -1189,8 +1218,7 @@ static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
                     else
                     {
                         nrc = UDS_NRC_PR;
-                        res_data[0] = (identifier >> 8) & 0xFF;
-                        res_data[1] = (identifier >> 0) & 0xFF;
+                        __uds_store_big_endian(&res_data[0], identifier, 2);
                         *res_data_len = 2;
                     }
                 }
@@ -1210,7 +1238,7 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
     uint8_t nrc = UDS_NRC_GR;
     uint8_t addr_len = 0;
     uint8_t size_len = 0;
-    void * addr = 0;
+    uintptr_t addr = 0;
     size_t size = 0;
     unsigned long p = 0;
     int ret;
@@ -1223,8 +1251,8 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
     }
     else
     {
-        addr_len = (data[0] >> 0) & 0x0F;
-        size_len = (data[0] >> 4) & 0x0F;
+        addr_len = __UDS_LOW_NIBBLE(data[0]);
+        size_len = __UDS_HIGH_NIBBLE(data[0]);
 
         if ((1UL + addr_len + size_len) > data_len)
         {
@@ -1239,34 +1267,16 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
         {
             nrc = UDS_NRC_PR;
 
-            /* Extract address from incoming data; p starts at addr_len because
-             * address is stored inside data[] starting from data[1] */
-            for (p = addr_len; p > 0; p--)
+            ret = __uds_load_big_endian_addr(&data[1], addr_len, &addr);
+            if (ret != 0)
             {
-                if (p <= sizeof(void*))
-                {
-                    addr = (void *)((uintptr_t)addr | ((0xFFULL & data[p]) << (8 * (addr_len - p))));
-                }
-                else if (data[p] != 0x00)
-                {
-                    nrc = UDS_NRC_ROOR;
-                    break;
-                }
+                nrc = UDS_NRC_ROOR;
             }
 
-            /* Extract size from incoming data; p starts at size_len because
-             * size is stored inside data[] starting from data[1 + addr_len] */
-            for (p = size_len; p > 0; p--)
+            ret = __uds_load_big_endian_size(&data[1 + addr_len], size_len, &size);
+            if (ret != 0)
             {
-                if (p < sizeof(size_t))
-                {
-                    size |= ((0xFFUL & data[addr_len + p]) << (8 * (size_len - p)));
-                }
-                else if (data[addr_len + p] != 0x00)
-                {
-                    nrc = UDS_NRC_ROOR;
-                    break;
-                }
+                nrc = UDS_NRC_ROOR;
             }
 
             if (UDS_NRC_PR != nrc)
@@ -1281,7 +1291,7 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
             }
             else
             {
-                uds_debug(ctx, "request to write memory at %p, size %lu\n", addr, size);
+                uds_debug(ctx, "request to write memory at %p, size %lu\n", (void *)addr, size);
 
                 for (p = 0; p < ctx->config->num_mem_regions; p++)
                 {
@@ -1309,7 +1319,7 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
                                                                        size);
                             if (ret != 0)
                             {
-                                uds_err(ctx, "failed to write memory at %p, len = %lu\n", addr, size);
+                                uds_err(ctx, "failed to write memory at %p, len = %lu\n", (void *)addr, size);
                                 nrc = UDS_NRC_GPF;
                             }
                             else
@@ -1324,7 +1334,7 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
 
                 if (p == ctx->config->num_mem_regions)
                 {
-                    uds_debug(ctx, "memory address %p non found in any region\n", addr);
+                    uds_debug(ctx, "memory address %p non found in any region\n", (void *)addr);
                     nrc = UDS_NRC_ROOR;
                 }
             }
@@ -1356,7 +1366,7 @@ static uint8_t __uds_svc_io_control_by_identifier(uds_context_t *ctx,
     }
     else
     {
-        identifier = (data[0] << 8) | (data[1] << 0);
+        identifier = __UDS_LOAD_UINT16_BIG_ENDIAN(&data[0]);
         iocp = data[2];
 
         uds_debug(ctx, "requested IO control with DID 0x%04X\n", identifier);
@@ -1438,9 +1448,7 @@ static uint8_t __uds_svc_clear_diagnostic_information(uds_context_t *ctx,
     }
     else
     {
-        godtc = ((0x0000FFU & data[0]) << 16) |
-                ((0x0000FFU & data[1]) <<  8) |
-                ((0x0000FFU & data[2]) <<  0);
+        godtc = __uds_load_big_endian(&data[0], 3);
 
         uds_debug(ctx, "requested clear of diagnostic data for GODTC 0x%06X\n", godtc);
 
@@ -1526,8 +1534,7 @@ static uint8_t __uds_rdtci_report_number_of_dtc_by_status_mask(uds_context_t *ct
         nrc = UDS_NRC_PR;
         res_data[0] = status_mask;
         res_data[1] = ctx->config->dtc_information.format_identifier;
-        res_data[2] = (number_of_dtc >> 8) & 0xFF;
-        res_data[3] = (number_of_dtc >> 0) & 0xFF;
+        __uds_store_big_endian(&res_data[2], number_of_dtc, 2);
         *res_data_len = 4;
     }
 
@@ -1573,9 +1580,7 @@ static uint8_t __uds_rdtci_report_dtc_by_status_mask(uds_context_t *ctx,
             }
             else if ((dtc_status_mask & status_mask) != 0)
             {
-                dtc_data[0] = (dtc_number >> 16) & 0xFF;
-                dtc_data[1] = (dtc_number >>  8) & 0xFF;
-                dtc_data[2] = (dtc_number >>  0) & 0xFF;
+                __uds_store_big_endian(&dtc_data[0], dtc_number, 3);
                 dtc_data[3] = dtc_status;
                 dtc_data += 4;
             }
@@ -1621,9 +1626,7 @@ static uint8_t __uds_rdtci_report_dtc_snapshot_identification(uds_context_t *ctx
 
                 if (ctx->config->dtc_information.cb_is_dtc_snapshot_record_available(ctx->priv, dtc_number, r) != 0)
                 {
-                    out_data[0] = (dtc_number >> 16) & 0xFF;
-                    out_data[1] = (dtc_number >>  8) & 0xFF;
-                    out_data[2] = (dtc_number >>  0) & 0xFF;
+                    __uds_store_big_endian(&out_data[0], dtc_number, 3);
                     out_data[3] = r;
                     out_data += 4;
                 }
@@ -1670,9 +1673,7 @@ static uint8_t __uds_rdtci_report_dtc_snapshot_record(uds_context_t *ctx,
     }
     else
     {
-        dtc_number = ((0x0000FFU & data[0]) << 16) |
-                     ((0x0000FFU & data[1]) <<  8) |
-                     ((0x0000FFU & data[2]) <<  0);
+        dtc_number = __uds_load_big_endian(&data[0], 3);
         record_number = data[3];
 
         // Check if dtc_number is valid
@@ -1707,9 +1708,7 @@ static uint8_t __uds_rdtci_report_dtc_snapshot_record(uds_context_t *ctx,
             }
             else
             {
-                res_data[0] = (dtc_number >> 16) & 0xFF;
-                res_data[1] = (dtc_number >>  8) & 0xFF;
-                res_data[2] = (dtc_number >>  0) & 0xFF;
+                __uds_store_big_endian(&res_data[0], dtc_number, 3);
                 res_data[3] = dtc_status;
 
                 used_data_len = 4;
@@ -1846,9 +1845,7 @@ static uint8_t __uds_rdtci_report_dtc_extended_data(uds_context_t *ctx,
     }
     else
     {
-        dtc_number = ((0x0000FFU & data[0]) << 16) |
-                     ((0x0000FFU & data[1]) <<  8) |
-                     ((0x0000FFU & data[2]) <<  0);
+        dtc_number = __uds_load_big_endian(&data[0], 3);
         record_number = data[3];
 
         // Check if dtc_number is valid
@@ -1890,9 +1887,7 @@ static uint8_t __uds_rdtci_report_dtc_extended_data(uds_context_t *ctx,
             }
             else
             {
-                res_data[0] = (dtc_number >> 16) & 0xFF;
-                res_data[1] = (dtc_number >>  8) & 0xFF;
-                res_data[2] = (dtc_number >>  0) & 0xFF;
+                __uds_store_big_endian(&res_data[0], dtc_number, 3);
                 res_data[3] = dtc_status;
 
                 used_data_len = 4;
@@ -2096,7 +2091,7 @@ static uint8_t __uds_svc_routine_control(uds_context_t *ctx,
     else
     {
         routine_control_type = __UDS_GET_SUBFUNCTION(data[0]);
-        identifier = (data[1] << 8) | (data[2] << 0);
+        identifier = __UDS_LOAD_UINT16_BIG_ENDIAN(&data[1]);
 
         if (data_len > 3)
         {
@@ -2217,7 +2212,7 @@ static uint8_t __uds_svc_request_download(uds_context_t *ctx,
     uint8_t encrypting_method = 0;
     uint8_t addr_len = 0;
     uint8_t size_len = 0;
-    void * addr = 0;
+    uintptr_t addr = 0;
     size_t size = 0;
     unsigned long p = 0;
     int ret;
@@ -2230,11 +2225,11 @@ static uint8_t __uds_svc_request_download(uds_context_t *ctx,
     }
     else
     {
-        encrypting_method  = (data[0] >> 0) & 0x0F;
-        compression_method = (data[0] >> 4) & 0x0F;
+        encrypting_method  = __UDS_LOW_NIBBLE(data[0]);
+        compression_method = __UDS_HIGH_NIBBLE(data[0]);
 
-        addr_len = (data[1] >> 0) & 0x0F;
-        size_len = (data[1] >> 4) & 0x0F;
+        addr_len = __UDS_LOW_NIBBLE(data[1]);
+        size_len = __UDS_HIGH_NIBBLE(data[1]);
 
         if ((2U + addr_len + size_len) > data_len)
         {
@@ -2244,30 +2239,16 @@ static uint8_t __uds_svc_request_download(uds_context_t *ctx,
         {
             nrc = UDS_NRC_PR;
 
-            for (p = addr_len; p > 0; p--)
+            ret = __uds_load_big_endian_addr(&data[2], addr_len, &addr);
+            if (ret != 0)
             {
-                if (p <= sizeof(void*))
-                {
-                    addr = (void *)((uintptr_t)addr | ((0xFFULL & data[1 + p]) << (8 * (addr_len - p))));
-                }
-                else if (data[p] != 0x00)
-                {
-                    nrc = UDS_NRC_ROOR;
-                    break;
-                }
+                nrc = UDS_NRC_ROOR;
             }
 
-            for (p = size_len; p > 0; p--)
+            ret = __uds_load_big_endian_size(&data[2 + addr_len], size_len, &size);
+            if (ret != 0)
             {
-                if (p <= sizeof(size_t))
-                {
-                    size |= ((0xFFUL & data[1 + addr_len + p]) << (8 * (size_len - p)));
-                }
-                else if (data[addr_len + p] != 0x00)
-                {
-                    nrc = UDS_NRC_ROOR;
-                    break;
-                }
+                nrc = UDS_NRC_ROOR;
             }
 
             if (UDS_NRC_PR != nrc)
@@ -2277,12 +2258,12 @@ static uint8_t __uds_svc_request_download(uds_context_t *ctx,
             }
             else if (size == 0)
             {
-                uds_info(ctx, "request download at %p with null size\n", addr);
+                uds_info(ctx, "request download at %p with null size\n", (void *)addr);
                 nrc = UDS_NRC_ROOR;
             }
             else
             {
-                uds_debug(ctx, "request to download at %p, size %lu\n", addr, size);
+                uds_debug(ctx, "request to download at %p, size %lu\n", (void *)addr, size);
 
                 for (p = 0; p < ctx->config->num_mem_regions; p++)
                 {
@@ -2316,7 +2297,7 @@ static uint8_t __uds_svc_request_download(uds_context_t *ctx,
                                                                                   encrypting_method);
                             if (ret != 0)
                             {
-                                uds_err(ctx, "failed to request download at %p, len = %lu\n", addr, size);
+                                uds_err(ctx, "failed to request download at %p, len = %lu\n", (void *)addr, size);
                                 nrc = UDS_NRC_UDNA;
                             }
                             else
@@ -2324,7 +2305,7 @@ static uint8_t __uds_svc_request_download(uds_context_t *ctx,
                                 /* The max_block_len length reflects the complete message length,
                                  * including the service identifier and the data-parameters */
                                 size_len = sizeof(size_t);
-                                res_data[0] = (size_len & 0xF) << 4;
+                                res_data[0] = __UDS_FROM_NIBBLES(0, size_len);
                                 __uds_store_big_endian(&res_data[1], (ctx->config->mem_regions[p].max_block_len + 2), size_len);
                                 *res_data_len = (1 + size_len);
                                 nrc = UDS_NRC_PR;
@@ -2343,7 +2324,7 @@ static uint8_t __uds_svc_request_download(uds_context_t *ctx,
 
                 if (p == ctx->config->num_mem_regions)
                 {
-                    uds_debug(ctx, "download address %p non found in any region\n", addr);
+                    uds_debug(ctx, "download address %p non found in any region\n", (void *)addr);
                     nrc = UDS_NRC_ROOR;
                 }
             }
@@ -2363,7 +2344,7 @@ static uint8_t __uds_svc_request_upload(uds_context_t *ctx,
     uint8_t encrypting_method = 0;
     uint8_t addr_len = 0;
     uint8_t size_len = 0;
-    void * addr = 0;
+    uintptr_t addr = 0;
     size_t size = 0;
     unsigned long p = 0;
     int ret;
@@ -2376,11 +2357,11 @@ static uint8_t __uds_svc_request_upload(uds_context_t *ctx,
     }
     else
     {
-        encrypting_method  = (data[0] >> 0) & 0x0F;
-        compression_method = (data[0] >> 4) & 0x0F;
+        encrypting_method  = __UDS_LOW_NIBBLE(data[0]);
+        compression_method = __UDS_HIGH_NIBBLE(data[0]);
 
-        addr_len = (data[1] >> 0) & 0x0F;
-        size_len = (data[1] >> 4) & 0x0F;
+        addr_len = __UDS_LOW_NIBBLE(data[1]);
+        size_len = __UDS_HIGH_NIBBLE(data[1]);
 
         if ((2U + addr_len + size_len) > data_len)
         {
@@ -2390,30 +2371,16 @@ static uint8_t __uds_svc_request_upload(uds_context_t *ctx,
         {
             nrc = UDS_NRC_PR;
 
-            for (p = addr_len; p > 0; p--)
+            ret = __uds_load_big_endian_addr(&data[2], addr_len, &addr);
+            if (ret != 0)
             {
-                if (p <= sizeof(void*))
-                {
-                    addr = (void *)((uintptr_t)addr | ((0xFFULL & data[1 + p]) << (8 * (addr_len - p))));
-                }
-                else if (data[p] != 0x00)
-                {
-                    nrc = UDS_NRC_ROOR;
-                    break;
-                }
+                nrc = UDS_NRC_ROOR;
             }
 
-            for (p = size_len; p > 0; p--)
+            ret = __uds_load_big_endian_size(&data[2 + addr_len], size_len, &size);
+            if (ret != 0)
             {
-                if (p <= sizeof(size_t))
-                {
-                    size |= ((0xFFUL & data[1 + addr_len + p]) << (8 * (size_len - p)));
-                }
-                else if (data[addr_len + p] != 0x00)
-                {
-                    nrc = UDS_NRC_ROOR;
-                    break;
-                }
+                nrc = UDS_NRC_ROOR;
             }
 
             if (UDS_NRC_PR != nrc)
@@ -2423,12 +2390,12 @@ static uint8_t __uds_svc_request_upload(uds_context_t *ctx,
             }
             else if (size == 0)
             {
-                uds_info(ctx, "request upload from %p with null size\n", addr);
+                uds_info(ctx, "request upload from %p with null size\n", (void *)addr);
                 nrc = UDS_NRC_ROOR;
             }
             else
             {
-                uds_debug(ctx, "request to upload from %p, size %lu\n", addr, size);
+                uds_debug(ctx, "request to upload from %p, size %lu\n", (void *)addr, size);
 
                 for (p = 0; p < ctx->config->num_mem_regions; p++)
                 {
@@ -2462,7 +2429,7 @@ static uint8_t __uds_svc_request_upload(uds_context_t *ctx,
                                                                                 encrypting_method);
                             if (ret != 0)
                             {
-                                uds_err(ctx, "failed to request upload from %p, len = %lu\n", addr, size);
+                                uds_err(ctx, "failed to request upload from %p, len = %lu\n", (void *)addr, size);
                                 nrc = UDS_NRC_UDNA;
                             }
                             else
@@ -2470,7 +2437,7 @@ static uint8_t __uds_svc_request_upload(uds_context_t *ctx,
                                 /* The max_block_size length reflects the complete message length,
                                  * including the service identifier and the data-parameters */
                                 size_len = sizeof(size_t);
-                                res_data[0] = (size_len & 0xF) << 4;
+                                res_data[0] = __UDS_FROM_NIBBLES(0, size_len);
                                 __uds_store_big_endian(&res_data[1], (ctx->config->mem_regions[p].max_block_len + 2), size_len);
                                 *res_data_len = (1 + size_len);
                                 nrc = UDS_NRC_PR;
@@ -2490,7 +2457,7 @@ static uint8_t __uds_svc_request_upload(uds_context_t *ctx,
 
                 if (p == ctx->config->num_mem_regions)
                 {
-                    uds_debug(ctx, "upload address %p non found in any region\n", addr);
+                    uds_debug(ctx, "upload address %p non found in any region\n", (void *)addr);
                     nrc = UDS_NRC_ROOR;
                 }
             }
@@ -2537,7 +2504,7 @@ static uint8_t __uds_transmit_data_download(uds_context_t *ctx, uint8_t bsqc,
         if (ret != 0)
         {
             uds_err(ctx, "download of block %u failed (address %p, size %lu)\n",
-                    bsqc, ctx->data_transfer.address, data_len);
+                    bsqc, (void *)ctx->data_transfer.address, data_len);
             nrc = UDS_NRC_GPF;
         }
         else
@@ -2546,7 +2513,7 @@ static uint8_t __uds_transmit_data_download(uds_context_t *ctx, uint8_t bsqc,
             res_data[0] = bsqc;
             *res_data_len = 1;
             ctx->data_transfer.bsqc = (ctx->data_transfer.bsqc + 1) & 0xFF;
-            ctx->data_transfer.address = (void *)((uintptr_t)ctx->data_transfer.address + data_len);
+            ctx->data_transfer.address = (ctx->data_transfer.address + data_len);
         }
     }
     else if (bsqc == ((ctx->data_transfer.bsqc - 1) & 0xFF))
@@ -2603,7 +2570,7 @@ static uint8_t __uds_transmit_data_upload(uds_context_t *ctx, uint8_t bsqc,
         if (ret != 0)
         {
             uds_err(ctx, "upload of block %u failed (address %p)\n",
-                    bsqc, ctx->data_transfer.address);
+                    bsqc, (void *)ctx->data_transfer.address);
             nrc = UDS_NRC_GPF;
         }
         else
@@ -2613,11 +2580,11 @@ static uint8_t __uds_transmit_data_upload(uds_context_t *ctx, uint8_t bsqc,
             *res_data_len = (read_data + 1);
             ctx->data_transfer.bsqc = (ctx->data_transfer.bsqc + 1) & 0xFF;
             ctx->data_transfer.prev_address = ctx->data_transfer.address;
-            ctx->data_transfer.address = (void *)((uintptr_t)ctx->data_transfer.address + read_data);
+            ctx->data_transfer.address = (ctx->data_transfer.address + read_data);
         }
     }
     else if ((bsqc == ((ctx->data_transfer.bsqc - 1) & 0xFF)) &&
-             (NULL != ctx->data_transfer.prev_address))
+             (ctx->data_transfer.prev_address != 0))
     {
         ret = ctx->data_transfer.mem_region->cb_upload(ctx->priv,
                                                        ctx->data_transfer.prev_address,
@@ -2625,7 +2592,7 @@ static uint8_t __uds_transmit_data_upload(uds_context_t *ctx, uint8_t bsqc,
         if (ret != 0)
         {
             uds_err(ctx, "re-upload of block %u failed (address %p)\n",
-                    bsqc, ctx->data_transfer.prev_address);
+                    bsqc, (void *)ctx->data_transfer.prev_address);
             nrc = UDS_NRC_GPF;
         }
         else
@@ -2817,7 +2784,7 @@ static uint8_t __uds_file_transfer_addfile(uds_context_t *ctx,
     }
     else
     {
-        file_path_len = ((0x00FF & data[1]) << 8) | data[2];
+        file_path_len = __UDS_LOAD_UINT16_BIG_ENDIAN(&data[1]);
         if (data_len < (5 + file_path_len))
         {
             nrc = UDS_NRC_IMLOIF;
@@ -2923,7 +2890,7 @@ static uint8_t __uds_file_transfer_delfile(uds_context_t *ctx,
     }
     else
     {
-        file_path_len = ((0x00FF & data[1]) << 8) | data[2];
+        file_path_len = __UDS_LOAD_UINT16_BIG_ENDIAN(&data[1]);
         if (data_len < (5 + file_path_len))
         {
             nrc = UDS_NRC_IMLOIF;
@@ -2989,7 +2956,7 @@ static uint8_t __uds_file_transfer_replfile(uds_context_t *ctx,
     }
     else
     {
-        file_path_len = ((0x00FF & data[1]) << 8) | data[2];
+        file_path_len = __UDS_LOAD_UINT16_BIG_ENDIAN(&data[1]);
         if (data_len < (5 + file_path_len))
         {
             nrc = UDS_NRC_IMLOIF;
@@ -3099,7 +3066,7 @@ static uint8_t __uds_file_transfer_rdfile(uds_context_t *ctx,
     }
     else
     {
-        file_path_len = ((0x00FF & data[1]) << 8) | data[2];
+        file_path_len = __UDS_LOAD_UINT16_BIG_ENDIAN(&data[1]);
         if (data_len < (4 + file_path_len))
         {
             nrc = UDS_NRC_IMLOIF;
@@ -3191,7 +3158,7 @@ static uint8_t __uds_file_transfer_rddir(uds_context_t *ctx,
     }
     else
     {
-        dir_path_len = ((0x00FF & data[1]) << 8) | data[2];
+        dir_path_len = __UDS_LOAD_UINT16_BIG_ENDIAN(&data[1]);
         if (data_len < (3 + dir_path_len))
         {
             nrc = UDS_NRC_IMLOIF;

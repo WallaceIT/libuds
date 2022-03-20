@@ -404,19 +404,19 @@ static const uds_config_data_t data_items[] =
     }
 };
 
-static int mem_region_read(void *priv, const void *address,
+static int mem_region_read(void *priv, const uintptr_t address,
                            uint8_t *data, const size_t data_len)
 {
     return 0;
 }
 
-static int mem_region_write(void *priv, const void *address,
+static int mem_region_write(void *priv, const uintptr_t address,
                             const uint8_t *data, const size_t data_len)
 {
     return 0;
 }
 
-static int mem_region_download_request(void *priv, const void *address,
+static int mem_region_download_request(void *priv, const uintptr_t address,
                                        const size_t data_len,
                                        const uint8_t compression_method,
                                        const uint8_t encrypting_method)
@@ -424,7 +424,7 @@ static int mem_region_download_request(void *priv, const void *address,
     return 0;
 }
 
-static int mem_region_download(void *priv, const void *address,
+static int mem_region_download(void *priv, const uintptr_t address,
                                const uint8_t *data, const size_t data_len)
 {
     return 0;
@@ -438,8 +438,8 @@ static int mem_region_download_exit(void *priv)
 static const uds_config_memory_region_t mem_regions[] = 
 {
     {
-        .start = (const void *)0x00000000,
-        .stop  = (const void *)0x00100000,
+        .start = 0x00000000U,
+        .stop  = 0x00100000U,
 
         .cb_read = mem_region_read,
         .sec_read.sa_type_mask = UDS_CFG_SA_TYPE_NONE,
