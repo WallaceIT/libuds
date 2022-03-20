@@ -1,4 +1,5 @@
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
@@ -22,6 +23,7 @@
 #include <sys/ioctl.h>
 #include <sys/signalfd.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/timerfd.h>
 #include <sys/un.h>
 
@@ -65,7 +67,7 @@ static int can_tp_init(const char *interface, uint32_t rx_id, uint32_t tx_id, bo
 
     memset(&fcopts, 0, sizeof(fcopts));
     fcopts.bs = 0;
-    fcopts.stmin = 5;
+    fcopts.stmin = 20;
     fcopts.wftmax = 10;
     setsockopt(fd, SOL_CAN_ISOTP, CAN_ISOTP_RECV_FC, &fcopts, sizeof(fcopts));
 
@@ -279,20 +281,28 @@ static const uds_session_cfg_t uds_sessions[] =
     {
         .session_type = 0x01, // Default Session
         .sa_type_mask = UDS_CFG_SA_TYPE_ALL,
+        .p2_timeout_ms = 50,
+        .p2star_timeout_ms = 1000,
     },
     {
         .session_type = 0x02, // Programming Session
         .sa_type_mask = UDS_CFG_SA_TYPE_ALL,
-        .timeout_ms = 3000,
+        .s3_time = 3000,
+        .p2_timeout_ms = 65535,
+        .p2star_timeout_ms = 65535,
     },
     {
         .session_type = 0x03, // Extended Diagnostic Session
         .sa_type_mask = UDS_CFG_SA_TYPE_ALL,
-        .timeout_ms = 3000,
+        .s3_time = 3000,
+        .p2_timeout_ms = 500,
+        .p2star_timeout_ms = 1000,
     },
     {
         .session_type = 0x04, // Safety System Diagnostic Session
         .sa_type_mask = UDS_CFG_SA_TYPE_ALL,
+        .p2_timeout_ms = 50,
+        .p2star_timeout_ms = 1000,
     },
 };
 
@@ -409,11 +419,8 @@ static int mem_region_write(void *priv, const void *address,
 static int mem_region_download_request(void *priv, const void *address,
                                        const size_t data_len,
                                        const uint8_t compression_method,
-                                       const uint8_t encrypting_method,
-                                       size_t *max_block_len)
+                                       const uint8_t encrypting_method)
 {
-    *max_block_len = 512;
-
     return 0;
 }
 
@@ -436,46 +443,71 @@ static const uds_config_memory_region_t mem_regions[] =
 
         .cb_read = mem_region_read,
         .sec_read.sa_type_mask = UDS_CFG_SA_TYPE_NONE,
-        .sec_read.standard_session_mask = UDS_CFG_SESSION_MASK_ALL,
-        .sec_read.specific_session_mask = UDS_CFG_SESSION_MASK_ALL,
+        .sec_read.standard_session_mask = UDS_CFG_SESSION_MASK(0x02),
 
         .cb_write = mem_region_write,
         .sec_write.sa_type_mask = UDS_CFG_SA_TYPE_NONE,
-        .sec_write.standard_session_mask = UDS_CFG_SESSION_MASK_ALL,
-        .sec_write.specific_session_mask = UDS_CFG_SESSION_MASK_ALL,
+        .sec_write.standard_session_mask = UDS_CFG_SESSION_MASK(0x02),
 
         .cb_download_request = mem_region_download_request,
         .cb_download         = mem_region_download,
         .cb_download_exit    = mem_region_download_exit,
         .sec_download.sa_type_mask = UDS_CFG_SA_TYPE_NONE,
-        .sec_download.standard_session_mask = UDS_CFG_SESSION_MASK_ALL,
-        .sec_download.specific_session_mask = UDS_CFG_SESSION_MASK_ALL,
+        .sec_download.standard_session_mask = UDS_CFG_SESSION_MASK(0x02),
+
+        .max_block_len = 512,
     }
 };
 
-static char buf_filepath[4096];
+static char buf_path[4096];
 static size_t cur_offset = 0;
 
 static int file_transfer_open(void *priv, const char *filepath, size_t filepath_len,
-                              uds_file_mode_e mode, intptr_t *fd, size_t *max_block_len)
+                              uds_file_mode_e mode, intptr_t *fd,
+                              size_t *file_size, size_t *file_size_compressed,
+                              const uint8_t compression_method, const uint8_t encrypting_method)
 {
-    int tmp_fd = -1;
+    intptr_t tmp_fd = -1;
     int ret = 0;
 
-    memcpy(buf_filepath, filepath, filepath_len);
-    buf_filepath[filepath_len] = '\0';
+    memcpy(buf_path, filepath, filepath_len);
+    buf_path[filepath_len] = '\0';
 
     if (mode == UDS_FILE_MODE_READ)
     {
-        tmp_fd = open(buf_filepath, O_RDONLY);
+        tmp_fd = open(buf_path, O_RDONLY);
+        if (tmp_fd >= 0)
+        {
+            struct stat st;
+            ret = fstat(tmp_fd, &st);
+            if (ret < 0)
+            {
+                close(tmp_fd);
+                tmp_fd = -1;
+            }
+            else
+            {
+                *file_size = st.st_size;
+                *file_size_compressed = st.st_size;
+            }
+        }
     }
     else if (mode == UDS_FILE_MODE_WRITE_CREATE)
     {
-        tmp_fd = open(buf_filepath, O_WRONLY | O_CREAT | O_EXCL, 0600);
+        tmp_fd = open(buf_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
     }
     else if (mode == UDS_FILE_MODE_WRITE_REPLACE)
     {
-        tmp_fd = open(buf_filepath, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        tmp_fd = open(buf_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    }
+    else if (mode == UDS_FILE_MODE_LIST_DIR)
+    {
+        DIR *d;
+        d = opendir(buf_path);
+        if (d != NULL)
+        {
+            tmp_fd = (intptr_t)d;
+        }
     }
 
     if (tmp_fd < 0)
@@ -485,7 +517,6 @@ static int file_transfer_open(void *priv, const char *filepath, size_t filepath_
     else
     {
         *fd = tmp_fd;
-        *max_block_len = 512;
 
         cur_offset = 0;
     }
@@ -493,7 +524,19 @@ static int file_transfer_open(void *priv, const char *filepath, size_t filepath_
     return ret;
 }
 
-static int file_transfer_read(void *priv, intptr_t fd, size_t offset, void *buf, size_t count)
+static int file_transfer_list(void *priv, intptr_t fd, size_t offset, void *buf, size_t *count)
+{
+    DIR *d = (DIR *)fd;
+    struct dirent *dir = NULL;
+    int ret = 0;
+
+    while (0)
+        ;
+
+    return ret;
+}
+
+static int file_transfer_read(void *priv, intptr_t fd, size_t offset, void *buf, size_t *count)
 {
     int ret = 0;
 
@@ -504,10 +547,11 @@ static int file_transfer_read(void *priv, intptr_t fd, size_t offset, void *buf,
 
     if (ret == 0)
     {
-        ret = read(fd, buf, count);
-        if (ret == count)
+        ret = read(fd, buf, *count);
+        if (ret > 0)
         {
-            cur_offset = (offset + count);
+            *count = ret;
+            cur_offset = (offset + *count);
             ret = 0;
         }
     }
@@ -537,25 +581,33 @@ static int file_transfer_write(void *priv, intptr_t fd, size_t offset, const voi
     return ret;
 }
 
-static int file_transfer_close(void *priv, intptr_t fd)
+static int file_transfer_close(void *priv, uds_file_mode_e mode, intptr_t fd)
 {
-    close(fd);
-    return 0;
+    int ret = 0;
+
+    if (mode == UDS_FILE_MODE_LIST_DIR)
+    {
+        DIR *d = (DIR *)fd;
+        ret = closedir(d);
+    }
+    else
+    {
+        ret = close(fd);
+    }
+
+    return ret;
 }
 
 static int file_transfer_delete(void *priv, const char *filepath, size_t filepath_len)
 {
-    memcpy(buf_filepath, filepath, filepath_len);
-    buf_filepath[filepath_len] = '\0';
+    memcpy(buf_path, filepath, filepath_len);
+    buf_path[filepath_len] = '\0';
 
-    return unlink(buf_filepath);
+    return unlink(buf_path);
 }
 
 static const uds_config_t uds_config =
 {
-    .p2 = 2500,
-    .p2max = 20000,
-
     .session_config = uds_sessions,
     .num_session_config = sizeof(uds_sessions) / sizeof(uds_session_cfg_t),
 
@@ -575,11 +627,13 @@ static const uds_config_t uds_config =
     .file_transfer =
     {
         .cb_open = file_transfer_open,
+        .cb_list = file_transfer_list,
+        .cb_read = file_transfer_read,
         .cb_write = file_transfer_write,
         .cb_close = file_transfer_close,
         .sec.sa_type_mask = UDS_CFG_SA_TYPE_NONE,
-        .sec.standard_session_mask = UDS_CFG_SESSION_MASK_ALL,
-        .sec.specific_session_mask = UDS_CFG_SESSION_MASK_ALL,
+        .sec.standard_session_mask = UDS_CFG_SESSION_MASK(0x02),
+        .max_block_len = 512,
     },
 
     .dtc_information =

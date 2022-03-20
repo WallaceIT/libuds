@@ -14,6 +14,9 @@
 #define __UDS_GET_SUBFUNCTION(x) (x&(~UDS_SPRMINB))
 #define __UDS_SUPPRESS_PR(x) (UDS_SPRMINB==(x&UDS_SPRMINB))
 
+#define __UDS_HIGH_NIBBLE(b)    ((b>>4)&0xF)
+#define __UDS_LOW_NIBBLE(b)     (b&0xF)
+
 #define __UDS_INVALID_SA_INDEX 0xFF
 #define __UDS_INVALID_DATA_IDENTIFIER 0xFFFF
 #define __UDS_INVALID_GROUP_OF_DTC 0x00000000
@@ -190,8 +193,6 @@ static inline int __uds_data_transfer_active(uds_context_t *ctx)
         ret = 0;
     }
 
-    uds_info(ctx, "__uds_data_transfer_active -> %d\n", ret);
-
     return ret;
 }
 
@@ -204,7 +205,9 @@ static inline void __uds_data_transfer_reset(uds_context_t *ctx)
     ctx->data_transfer.address = NULL;
     ctx->data_transfer.prev_address = NULL;
     ctx->data_transfer.bsqc = 0;
-    ctx->data_transfer.file_fd = -1;
+    ctx->data_transfer.fd = -1;
+    ctx->data_transfer.max_block_len = 0;
+
 }
 
 static int __uds_send(uds_context_t *ctx, const uint8_t *data, size_t len)
@@ -281,10 +284,10 @@ static uint8_t __uds_svc_session_control(uds_context_t *ctx,
         {
             nrc = UDS_NRC_PR;
             res_data[0] = requested_session;
-            res_data[1] = ((ctx->config->p2 >> 8) & 0xFF);
-            res_data[2] = ((ctx->config->p2 >> 0) & 0xFF);
-            res_data[3] = ((ctx->config->p2max >> 8) & 0xFF);
-            res_data[4] = ((ctx->config->p2max >> 0) & 0xFF);
+            res_data[1] = ((ctx->config->session_config[s].p2_timeout_ms >> 8) & 0xFF);
+            res_data[2] = ((ctx->config->session_config[s].p2_timeout_ms >> 0) & 0xFF);
+            res_data[3] = ((ctx->config->session_config[s].p2star_timeout_ms >> 8) & 0xFF);
+            res_data[4] = ((ctx->config->session_config[s].p2star_timeout_ms >> 0) & 0xFF);
             *res_data_len = 5;
         }
     }
@@ -2310,8 +2313,7 @@ static uint8_t __uds_svc_request_download(uds_context_t *ctx,
                             ret = ctx->config->mem_regions[p].cb_download_request(ctx->priv,
                                                                                   addr, size,
                                                                                   compression_method,
-                                                                                  encrypting_method,
-                                                                                  &ctx->data_transfer.max_block_len);
+                                                                                  encrypting_method);
                             if (ret != 0)
                             {
                                 uds_err(ctx, "failed to request download at %p, len = %lu\n", addr, size);
@@ -2323,7 +2325,7 @@ static uint8_t __uds_svc_request_download(uds_context_t *ctx,
                                  * including the service identifier and the data-parameters */
                                 size_len = sizeof(size_t);
                                 res_data[0] = (size_len & 0xF) << 4;
-                                __uds_store_big_endian(&res_data[1], (ctx->data_transfer.max_block_len + 2), size_len);
+                                __uds_store_big_endian(&res_data[1], (ctx->config->mem_regions[p].max_block_len + 2), size_len);
                                 *res_data_len = (1 + size_len);
                                 nrc = UDS_NRC_PR;
 
@@ -2332,6 +2334,7 @@ static uint8_t __uds_svc_request_download(uds_context_t *ctx,
                                 ctx->data_transfer.mem_region = &ctx->config->mem_regions[p];
                                 /* Block sequence counter starts from 1 */
                                 ctx->data_transfer.bsqc = 0x01;
+                                ctx->data_transfer.max_block_len = ctx->config->mem_regions[p].max_block_len;
                             }
                         }
                         break;
@@ -2454,10 +2457,9 @@ static uint8_t __uds_svc_request_upload(uds_context_t *ctx,
                         else
                         {
                             ret = ctx->config->mem_regions[p].cb_upload_request(ctx->priv,
-                                                                                  addr, size,
-                                                                                  compression_method,
-                                                                                  encrypting_method,
-                                                                                  &ctx->data_transfer.max_block_len);
+                                                                                addr, size,
+                                                                                compression_method,
+                                                                                encrypting_method);
                             if (ret != 0)
                             {
                                 uds_err(ctx, "failed to request upload from %p, len = %lu\n", addr, size);
@@ -2469,7 +2471,7 @@ static uint8_t __uds_svc_request_upload(uds_context_t *ctx,
                                  * including the service identifier and the data-parameters */
                                 size_len = sizeof(size_t);
                                 res_data[0] = (size_len & 0xF) << 4;
-                                __uds_store_big_endian(&res_data[1], (ctx->data_transfer.max_block_len + 2), size_len);
+                                __uds_store_big_endian(&res_data[1], (ctx->config->mem_regions[p].max_block_len + 2), size_len);
                                 *res_data_len = (1 + size_len);
                                 nrc = UDS_NRC_PR;
 
@@ -2478,6 +2480,8 @@ static uint8_t __uds_svc_request_upload(uds_context_t *ctx,
                                 ctx->data_transfer.mem_region = &ctx->config->mem_regions[p];
                                 /* Block sequence counter starts from 1 */
                                 ctx->data_transfer.bsqc = 0x01;
+                                ctx->data_transfer.max_block_len = ctx->config->mem_regions[p].max_block_len;
+
                             }
                         }
                         break;
@@ -2514,15 +2518,20 @@ static uint8_t __uds_transmit_data_download(uds_context_t *ctx, uint8_t bsqc,
         if (ctx->data_transfer.direction == UDS_DATA_TRANSFER_DOWNLOAD_FILE)
         {
             ret = ctx->config->file_transfer.cb_write(ctx->priv,
-                                                      ctx->data_transfer.file_fd,
+                                                      ctx->data_transfer.fd,
                                                       (size_t)ctx->data_transfer.address,
                                                       data, data_len);
         }
-        else
+        else if (ctx->data_transfer.direction == UDS_DATA_TRANSFER_DOWNLOAD)
         {
             ret = ctx->data_transfer.mem_region->cb_download(ctx->priv,
                                                              ctx->data_transfer.address,
                                                              data, data_len);
+        }
+        else
+        {
+            uds_err(ctx, "invalid data transfer direction\n");
+            ret = -1;
         }
 
         if (ret != 0)
@@ -2563,18 +2572,34 @@ static uint8_t __uds_transmit_data_upload(uds_context_t *ctx, uint8_t bsqc,
                                           uint8_t *res_data, size_t *res_data_len)
 {
     uint8_t nrc = UDS_NRC_GR;
-    size_t read_data = (*res_data_len - 1);
+    size_t read_data = ctx->data_transfer.max_block_len;
     int ret;
 
-    if (read_data < ctx->data_transfer.max_block_len)
+    if ((*res_data_len - 1) < ctx->data_transfer.max_block_len)
     {
         nrc = UDS_NRC_ROOR;
     }
     else if (bsqc == ctx->data_transfer.bsqc)
     {
-        ret = ctx->data_transfer.mem_region->cb_upload(ctx->priv,
-                                                       ctx->data_transfer.address,
-                                                       &res_data[1], &read_data);
+        if (ctx->data_transfer.direction == UDS_DATA_TRANSFER_UPLOAD_FILE)
+        {
+            ret = ctx->config->file_transfer.cb_read(ctx->priv,
+                                                     ctx->data_transfer.fd,
+                                                     (size_t)ctx->data_transfer.address,
+                                                     &res_data[1], &read_data);
+        }
+        else if (ctx->data_transfer.direction == UDS_DATA_TRANSFER_UPLOAD)
+        {
+            ret = ctx->data_transfer.mem_region->cb_upload(ctx->priv,
+                                                           ctx->data_transfer.address,
+                                                           &res_data[1], &read_data);
+        }
+        else
+        {
+            uds_err(ctx, "invalid data transfer direction\n");
+            ret = -1;
+        }
+
         if (ret != 0)
         {
             uds_err(ctx, "upload of block %u failed (address %p)\n",
@@ -2644,7 +2669,9 @@ static uint8_t __uds_svc_transmit_data(uds_context_t *ctx,
                                                res_data, res_data_len);
         }
     }
-    else if (UDS_DATA_TRANSFER_UPLOAD == ctx->data_transfer.direction)
+    else if ((UDS_DATA_TRANSFER_UPLOAD == ctx->data_transfer.direction) ||
+             (UDS_DATA_TRANSFER_UPLOAD_FILE == ctx->data_transfer.direction) ||
+             (UDS_DATA_TRANSFER_LIST_DIR == ctx->data_transfer.direction))
     {
         if (data_len < 1)
         {
@@ -2713,7 +2740,8 @@ static uint8_t __uds_svc_request_transfer_exit(uds_context_t *ctx,
         if (NULL != ctx->config->file_transfer.cb_close)
         {
             ret = ctx->config->file_transfer.cb_close(ctx->priv,
-                                                      ctx->data_transfer.file_fd);
+                                                      ctx->data_transfer.file_mode,
+                                                      ctx->data_transfer.fd);
             if (ret != 0)
             {
                 uds_err(ctx, "file download close failed\n");
@@ -2728,10 +2756,27 @@ static uint8_t __uds_svc_request_transfer_exit(uds_context_t *ctx,
         if (NULL != ctx->config->file_transfer.cb_close)
         {
             ret = ctx->config->file_transfer.cb_close(ctx->priv,
-                                                      ctx->data_transfer.file_fd);
+                                                      ctx->data_transfer.file_mode,
+                                                      ctx->data_transfer.fd);
             if (ret != 0)
             {
                 uds_err(ctx, "file upload close failed\n");
+                nrc = UDS_NRC_GPF;
+            }
+        }
+        __uds_data_transfer_reset(ctx);
+    }
+    else if (UDS_DATA_TRANSFER_LIST_DIR == ctx->data_transfer.direction)
+    {
+        nrc = UDS_NRC_PR;
+        if (NULL != ctx->config->file_transfer.cb_close)
+        {
+            ret = ctx->config->file_transfer.cb_close(ctx->priv,
+                                                      ctx->data_transfer.file_mode,
+                                                      ctx->data_transfer.fd);
+            if (ret != 0)
+            {
+                uds_err(ctx, "dir close failed\n");
                 nrc = UDS_NRC_GPF;
             }
         }
@@ -2757,6 +2802,8 @@ static uint8_t __uds_file_transfer_addfile(uds_context_t *ctx,
     uint8_t filesize_param_len = 0xFF;
     size_t filesize_uncompressed = 0ULL;
     size_t filesize_compressed = 0ULL;
+    uint8_t compression_method = 0;
+    uint8_t encrypting_method = 0;
 
     if ((NULL == ctx->config->file_transfer.cb_open) ||
         (NULL == ctx->config->file_transfer.cb_write))
@@ -2799,6 +2846,9 @@ static uint8_t __uds_file_transfer_addfile(uds_context_t *ctx,
                 file_path = (const char *)&data[3];
                 data_format_identifier = data[3 + file_path_len];
 
+                compression_method = __UDS_HIGH_NIBBLE(data_format_identifier);
+                encrypting_method = __UDS_LOW_NIBBLE(data_format_identifier);
+
                 /* Extract sizes from incoming data */
                 filesize_uncompressed = __uds_load_big_endian(&data[4 + file_path_len],
                                                               filesize_param_len);
@@ -2806,16 +2856,19 @@ static uint8_t __uds_file_transfer_addfile(uds_context_t *ctx,
                 filesize_compressed = __uds_load_big_endian(&data[4 + file_path_len + filesize_param_len],
                                                             filesize_param_len);
 
-                uds_debug(ctx, "add file at %.*s, size %lu (%lu cmp), dfi=0x%02X\n",
+                uds_debug(ctx, "add file at %.*s, size %lu (%lu cmp), cmp=%u, enc=%u\n",
                           (int)file_path_len, file_path,
                           filesize_uncompressed, filesize_compressed,
-                          data_format_identifier);
+                          compression_method, encrypting_method);
 
                 ret = ctx->config->file_transfer.cb_open(ctx->priv,
                                                          file_path, file_path_len,
                                                          UDS_FILE_MODE_WRITE_CREATE,
                                                          &file_fd,
-                                                         &ctx->data_transfer.max_block_len);
+                                                         &filesize_uncompressed,
+                                                         &filesize_compressed,
+                                                         compression_method,
+                                                         encrypting_method);
                 if (ret < 0)
                 {
                     uds_err(ctx, "failed to open file %.*s for writing\n",
@@ -2830,16 +2883,18 @@ static uint8_t __uds_file_transfer_addfile(uds_context_t *ctx,
                     /* The max_block_len length reflects the complete message length,
                      * including the service identifier and the data-parameters */
                     res_data[1] = size_len;
-                    __uds_store_big_endian(&res_data[2], (ctx->data_transfer.max_block_len + 2), size_len);
+                    __uds_store_big_endian(&res_data[2], (ctx->config->file_transfer.max_block_len + 2), size_len);
                     res_data[2 + size_len] = data_format_identifier;
                     *res_data_len = (3 + size_len);
                     nrc = UDS_NRC_PR;
 
                     __uds_data_transfer_reset(ctx);
                     ctx->data_transfer.direction = UDS_DATA_TRANSFER_DOWNLOAD_FILE;
-                    ctx->data_transfer.file_fd = file_fd;
+                    ctx->data_transfer.file_mode = UDS_FILE_MODE_WRITE_CREATE;
+                    ctx->data_transfer.fd = file_fd;
                     /* Block sequence counter starts from 1 */
                     ctx->data_transfer.bsqc = 0x01;
+                    ctx->data_transfer.max_block_len = ctx->config->file_transfer.max_block_len;
                 }
             }
         }
@@ -2919,6 +2974,8 @@ static uint8_t __uds_file_transfer_replfile(uds_context_t *ctx,
     uint8_t filesize_param_len = 0xFF;
     size_t filesize_uncompressed = 0ULL;
     size_t filesize_compressed = 0ULL;
+    uint8_t compression_method = 0ULL;
+    uint8_t encrypting_method = 0ULL;
 
     if ((NULL == ctx->config->file_transfer.cb_open) ||
         (NULL == ctx->config->file_transfer.cb_write))
@@ -2961,23 +3018,29 @@ static uint8_t __uds_file_transfer_replfile(uds_context_t *ctx,
                 file_path = (const char *)&data[3];
                 data_format_identifier = data[3 + file_path_len];
 
+                compression_method = __UDS_HIGH_NIBBLE(data_format_identifier);
+                encrypting_method = __UDS_LOW_NIBBLE(data_format_identifier);
+
                 /* Extract sizes from incoming data */
-                filesize_uncompressed = __uds_load_big_endian(&data[4 + file_path_len],
+                filesize_uncompressed = __uds_load_big_endian(&data[5 + file_path_len],
                                                               filesize_param_len);
 
-                filesize_compressed = __uds_load_big_endian(&data[4 + file_path_len + filesize_param_len],
-                                                              filesize_param_len);
+                filesize_compressed = __uds_load_big_endian(&data[5 + file_path_len + filesize_param_len],
+                                                            filesize_param_len);
 
-                uds_debug(ctx, "replace file at %.*s, size %lu (%lu cmp), dfi=0x%02X\n",
+                uds_debug(ctx, "replace file at %.*s, size=%lu (%lu cmp), cmp=%u, enc=%u\n",
                           (int)file_path_len, file_path,
                           filesize_uncompressed, filesize_compressed,
-                          data_format_identifier);
+                          compression_method, encrypting_method);
 
                 ret = ctx->config->file_transfer.cb_open(ctx->priv,
                                                          file_path, file_path_len,
                                                          UDS_FILE_MODE_WRITE_REPLACE,
                                                          &file_fd,
-                                                         &ctx->data_transfer.max_block_len);
+                                                         &filesize_uncompressed,
+                                                         &filesize_compressed,
+                                                         compression_method,
+                                                         encrypting_method);
                 if (ret < 0)
                 {
                     uds_err(ctx, "failed to open file %.*s for writing\n",
@@ -2992,16 +3055,18 @@ static uint8_t __uds_file_transfer_replfile(uds_context_t *ctx,
                     /* The max_block_len length reflects the complete message length,
                      * including the service identifier and the data-parameters */
                     res_data[1] = size_len;
-                    __uds_store_big_endian(&res_data[2], (ctx->data_transfer.max_block_len + 2), size_len);
+                    __uds_store_big_endian(&res_data[2], (ctx->config->file_transfer.max_block_len + 2), size_len);
                     res_data[2 + size_len] = data_format_identifier;
                     *res_data_len = (3 + size_len);
                     nrc = UDS_NRC_PR;
 
                     __uds_data_transfer_reset(ctx);
                     ctx->data_transfer.direction = UDS_DATA_TRANSFER_DOWNLOAD_FILE;
-                    ctx->data_transfer.file_fd = file_fd;
+                    ctx->data_transfer.file_mode = UDS_FILE_MODE_WRITE_REPLACE;
+                    ctx->data_transfer.fd = file_fd;
                     /* Block sequence counter starts from 1 */
                     ctx->data_transfer.bsqc = 0x01;
+                    ctx->data_transfer.max_block_len = ctx->config->file_transfer.max_block_len;
                 }
             }
         }
@@ -3016,6 +3081,92 @@ static uint8_t __uds_file_transfer_rdfile(uds_context_t *ctx,
 {
     uint8_t nrc = UDS_NRC_SFNS;
 
+    const char *file_path = NULL;
+    size_t file_path_len = 0xFFFF;
+    uint8_t data_format_identifier = 0xFF;
+    uint8_t compression_method = 0ULL;
+    uint8_t encrypting_method = 0ULL;
+
+    if ((NULL == ctx->config->file_transfer.cb_open) ||
+        (NULL == ctx->config->file_transfer.cb_read))
+    {
+        uds_debug(ctx, "cb_open or cb_read not defined\n");
+        nrc = UDS_NRC_SFNS;
+    }
+    else if (data_len < 4)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        file_path_len = ((0x00FF & data[1]) << 8) | data[2];
+        if (data_len < (4 + file_path_len))
+        {
+            nrc = UDS_NRC_IMLOIF;
+        }
+        else if (file_path_len > __UDS_FILEPATH_MAX)
+        {
+            nrc = UDS_NRC_ROOR;
+        }
+        else
+        {
+            intptr_t file_fd = -1;
+            size_t filesize_uncompressed = 0;
+            size_t filesize_compressed = 0;
+            int ret = -1;
+
+            /* NOTE: file_path might not be zero-terminated */
+            file_path = (const char *)&data[3];
+            data_format_identifier = data[3 + file_path_len];
+
+            compression_method = __UDS_HIGH_NIBBLE(data_format_identifier);
+            encrypting_method = __UDS_LOW_NIBBLE(data_format_identifier);
+
+            ret = ctx->config->file_transfer.cb_open(ctx->priv,
+                                                     file_path, file_path_len,
+                                                     UDS_FILE_MODE_READ,
+                                                     &file_fd,
+                                                     &filesize_uncompressed,
+                                                     &filesize_compressed,
+                                                     compression_method,
+                                                     encrypting_method);
+            if (ret < 0)
+            {
+                uds_err(ctx, "failed to open file %.*s for reading\n",
+                        (int)file_path_len, file_path);
+                nrc = UDS_NRC_UDNA;
+            }
+            else
+            {
+                const uint8_t size_len = sizeof(size_t);
+
+                uds_debug(ctx, "read file at %.*s, size=%lu (%lu cmp), cmp=%u, enc=%u\n",
+                          (int)file_path_len, file_path, filesize_uncompressed,
+                          filesize_compressed, compression_method, encrypting_method);
+
+                res_data[0] = data[0];
+                /* The max_block_len length reflects the complete message length,
+                 * including the service identifier and the data-parameters */
+                res_data[1] = size_len;
+                __uds_store_big_endian(&res_data[2], (ctx->config->file_transfer.max_block_len + 2), size_len);
+                res_data[2 + size_len] = data_format_identifier;
+                __uds_store_big_endian(&res_data[3 + size_len], size_len, 2);
+                __uds_store_big_endian(&res_data[5 + size_len], filesize_uncompressed, size_len);
+                __uds_store_big_endian(&res_data[5 + 2 * size_len], filesize_compressed, size_len);
+                *res_data_len = (5 + 3 * size_len);
+                nrc = UDS_NRC_PR;
+
+                __uds_data_transfer_reset(ctx);
+                ctx->data_transfer.direction = UDS_DATA_TRANSFER_UPLOAD_FILE;
+                ctx->data_transfer.file_mode = UDS_FILE_MODE_READ;
+                ctx->data_transfer.fd = file_fd;
+                /* Block sequence counter starts from 1 */
+                ctx->data_transfer.bsqc = 0x01;
+                ctx->data_transfer.max_block_len = ctx->config->file_transfer.max_block_len;
+            }
+        }
+    }
+
     return nrc;
 }
 
@@ -3024,6 +3175,79 @@ static uint8_t __uds_file_transfer_rddir(uds_context_t *ctx,
                                          uint8_t *res_data, size_t *res_data_len)
 {
     uint8_t nrc = UDS_NRC_SFNS;
+
+    const char *dir_path = NULL;
+    size_t dir_path_len = 0xFFFF;
+
+    if ((NULL == ctx->config->file_transfer.cb_open) ||
+        (NULL == ctx->config->file_transfer.cb_read))
+    {
+        uds_debug(ctx, "cb_open or cb_read not defined\n");
+        nrc = UDS_NRC_SFNS;
+    }
+    else if (data_len < 4)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        dir_path_len = ((0x00FF & data[1]) << 8) | data[2];
+        if (data_len < (3 + dir_path_len))
+        {
+            nrc = UDS_NRC_IMLOIF;
+        }
+        else if (dir_path_len > __UDS_FILEPATH_MAX)
+        {
+            nrc = UDS_NRC_ROOR;
+        }
+        else
+        {
+            intptr_t dir_fd = -1;
+            size_t dir_info_len = 0;
+            int ret = -1;
+
+            /* NOTE: dir_path might not be zero-terminated */
+            dir_path = (const char *)&data[3];
+
+            uds_debug(ctx, "read dir at %.*s\n", (int)dir_path_len, dir_path);
+
+            ret = ctx->config->file_transfer.cb_open(ctx->priv,
+                                                     dir_path, dir_path_len,
+                                                     UDS_FILE_MODE_LIST_DIR,
+                                                     &dir_fd,
+                                                     &dir_info_len, NULL,
+                                                     0, 0);
+            if (ret < 0)
+            {
+                uds_err(ctx, "failed to read dir at %.*s\n",
+                        (int)dir_path_len, dir_path);
+                nrc = UDS_NRC_UDNA;
+            }
+            else
+            {
+                const uint8_t size_len = sizeof(size_t);
+
+                res_data[0] = data[0];
+                /* The max_block_len length reflects the complete message length,
+                 * including the service identifier and the data-parameters */
+                res_data[1] = size_len;
+                __uds_store_big_endian(&res_data[2], (ctx->config->file_transfer.max_block_len + 2), size_len);
+                res_data[2 + size_len] = 0x00;
+                __uds_store_big_endian(&res_data[3 + size_len], size_len, 2);
+                __uds_store_big_endian(&res_data[5 + size_len], dir_info_len, size_len);
+                *res_data_len = (5 + 2 * size_len);
+                nrc = UDS_NRC_PR;
+
+                __uds_data_transfer_reset(ctx);
+                ctx->data_transfer.direction = UDS_DATA_TRANSFER_LIST_DIR;
+                ctx->data_transfer.file_mode = UDS_FILE_MODE_LIST_DIR;
+                ctx->data_transfer.fd = dir_fd;
+                /* Block sequence counter starts from 1 */
+                ctx->data_transfer.bsqc = 0x01;
+                ctx->data_transfer.max_block_len = ctx->config->file_transfer.max_block_len;
+            }
+        }
+    }
 
     return nrc;
 }
@@ -3278,17 +3502,6 @@ static int __uds_init(uds_context_t *ctx, const uds_config_t *config,
 
     memset(ctx->response_buffer, 0, ctx->response_buffer_len);
 
-    // Check and validate config
-    if (0 == ctx->config->p2)
-    {
-        uds_warning(ctx, "P2 time is set to 0ms\n");
-    }
-
-    if (0 == ctx->config->p2max)
-    {
-        uds_warning(ctx, "P2max time is set to 0ms\n");
-    }
-
     __uds_reset_to_default_session(ctx);
 
     return ret;
@@ -3411,9 +3624,9 @@ int uds_cycle(uds_context_t *ctx, const struct timespec *timestamp)
 
     elapsed_ms = timespec_elapsed_ms(timestamp, &ctx->last_message_timestamp);
     if ((elapsed_ms > 0) &&
-        (NULL != ctx->current_session) && (ctx->current_session->timeout_ms > 0))
+        (NULL != ctx->current_session) && (ctx->current_session->s3_time > 0))
     {
-        if ((unsigned long)elapsed_ms > ctx->current_session->timeout_ms)
+        if ((unsigned long)elapsed_ms > ctx->current_session->s3_time)
         {
             uds_info(ctx, "session timer expired, reset to default\n");
             __uds_reset_to_default_session(ctx);
@@ -3441,6 +3654,11 @@ int uds_cycle(uds_context_t *ctx, const struct timespec *timestamp)
                     __uds_data_transfer_reset(ctx);
                 }
                 else if ((UDS_DATA_TRANSFER_UPLOAD_FILE == ctx->data_transfer.direction) &&
+                         (__uds_session_and_security_check(ctx, &ctx->config->file_transfer.sec) != 0))
+                {
+                    __uds_data_transfer_reset(ctx);
+                }
+                else if ((UDS_DATA_TRANSFER_LIST_DIR == ctx->data_transfer.direction) &&
                          (__uds_session_and_security_check(ctx, &ctx->config->file_transfer.sec) != 0))
                 {
                     __uds_data_transfer_reset(ctx);

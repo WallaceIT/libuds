@@ -198,7 +198,8 @@ typedef enum {
 typedef enum {
     UDS_FILE_MODE_READ = 0,
     UDS_FILE_MODE_WRITE_CREATE = 1,
-    UDS_FILE_MODE_WRITE_REPLACE = 1,
+    UDS_FILE_MODE_WRITE_REPLACE = 2,
+    UDS_FILE_MODE_LIST_DIR = 3,
 } uds_file_mode_e;
 
 typedef struct __uds_security_cfg
@@ -212,7 +213,11 @@ typedef struct __uds_session_cfg
 {
     uint8_t session_type;
     uint64_t sa_type_mask;
-    unsigned long timeout_ms;
+
+    uint16_t p2_timeout_ms;
+    uint16_t p2star_timeout_ms;
+
+    unsigned long s3_time;
 } uds_session_cfg_t;
 
 typedef struct __uds_sa_cfg
@@ -303,8 +308,7 @@ typedef struct __uds_config_memory_region
     int (*cb_download_request)(void *priv, const void *address,
                                const size_t data_len,
                                const uint8_t compression_method,
-                               const uint8_t encrypting_method,
-                               size_t *max_block_len);
+                               const uint8_t encrypting_method);
     int (*cb_download)(void *priv, const void *address,
                        const uint8_t *data, const size_t data_len);
     int (*cb_download_exit)(void *priv);
@@ -313,12 +317,12 @@ typedef struct __uds_config_memory_region
     int (*cb_upload_request)(void *priv, const void *address,
                              const size_t data_len,
                              const uint8_t compression_method,
-                             const uint8_t encrypting_method,
-                             size_t *max_block_len);
+                             const uint8_t encrypting_method);
     int (*cb_upload)(void *priv, const void *address,
                      uint8_t *data, size_t *data_len);
     int (*cb_upload_exit)(void *priv);
     uds_security_cfg_t sec_upload;
+    size_t max_block_len;
 } uds_config_memory_region_t;
 
 typedef struct __uds_config_group_of_dtc
@@ -365,17 +369,24 @@ typedef struct __uds_config_dtc_information
 typedef struct __uds_config_file_access
 {
     int (*cb_open)(void *priv, const char *filepath, size_t filepath_len,
-                   uds_file_mode_e mode, intptr_t *fd, size_t *max_block_len);
+                   uds_file_mode_e mode, intptr_t *fd,
+                   size_t *file_size, size_t *file_size_compressed,
+                   const uint8_t compression_method, const uint8_t encrypting_method);
 
-    int (*cb_read)(void *priv, intptr_t fd, size_t offset, void *buf, size_t count);
+    int (*cb_list)(void *priv, intptr_t fd, size_t offset, void *buf, size_t *count);
+
+    int (*cb_read)(void *priv, intptr_t fd, size_t offset, void *buf, size_t *count);
 
     int (*cb_write)(void *priv, intptr_t fd, size_t offset, const void *buf, size_t count);
 
-    int (*cb_close)(void *priv, intptr_t fd);
+    int (*cb_close)(void *priv, uds_file_mode_e mode, intptr_t fd);
 
     int (*cb_delete)(void *priv, const char *filepath, size_t filepath_len);
 
     uds_security_cfg_t sec;
+
+    size_t max_block_len;
+
 } uds_config_file_access_t;
 
 typedef struct __uds_config_routine
@@ -400,9 +411,6 @@ typedef struct __uds_config_routine
 
 typedef struct __uds_config
 {
-    uint16_t p2;
-    uint16_t p2max;
-
     int (*cb_send)(void *priv, const uint8_t data[], size_t len);
     void (*cb_notify_session_change)(void *priv, const uint8_t session_type);
     void (*cb_notify_sa_change)(void *priv, const uint8_t sa_index);
@@ -443,6 +451,7 @@ typedef enum __uds_data_transfer_dir
     UDS_DATA_TRANSFER_UPLOAD,
     UDS_DATA_TRANSFER_DOWNLOAD_FILE,
     UDS_DATA_TRANSFER_UPLOAD_FILE,
+    UDS_DATA_TRANSFER_LIST_DIR,
 } uds_data_transfer_dir_e;
 
 typedef struct __uds_context
@@ -462,12 +471,13 @@ typedef struct __uds_context
     struct
     {
         uds_data_transfer_dir_e direction;
+        uds_file_mode_e file_mode;
         const uds_config_memory_region_t *mem_region;
         size_t max_block_len;
         uint8_t bsqc;
         void *prev_address;
         void *address;
-        intptr_t file_fd;
+        intptr_t fd;
     } data_transfer;
 
     uint8_t *response_buffer;
