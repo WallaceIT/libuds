@@ -277,6 +277,15 @@ typedef struct __uds_config_communication_control
     uds_security_cfg_t sec;
 } uds_config_communication_control_t;
 
+typedef struct __uds_config_access_timing_params
+{
+    int (*cb_read_available)(void *priv, uint8_t *out_data, size_t *out_data_len);
+    int (*cb_read_current)(void *priv, uint8_t *out_data, size_t *out_data_len);
+    int (*cb_set_default)(void *priv);
+    int (*cb_set_given)(void *priv, const uint8_t *data, size_t data_len);
+    uds_security_cfg_t sec;
+} uds_config_access_timing_params_t;
+
 typedef struct __uds_config_dtc_settings
 {
     int (*cb_dtc_on)(void *priv, const uint8_t *data, size_t data_len);
@@ -451,6 +460,7 @@ typedef struct __uds_config
 
     const uds_config_ecureset_t ecureset;
     const uds_config_communication_control_t communication_control;
+    const uds_config_access_timing_params_t access_timings_params;
     const uds_config_dtc_settings_t dtc_settings;
 
     const uds_config_data_t *data_items;

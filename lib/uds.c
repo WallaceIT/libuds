@@ -806,8 +806,6 @@ static uint8_t __uds_svc_communication_control(uds_context_t *ctx,
         }
         else
         {
-            int ret;
-
             ret = ctx->config->communication_control.cb_control(ctx->priv, action,
                                                                 message_type,
                                                                 subnet_address,
@@ -860,6 +858,93 @@ static uint8_t __uds_svc_tester_present(uds_context_t *ctx,
         res_data[0] = UDS_LEV_ZSUBF;
         *res_data_len = 1;
         nrc = UDS_NRC_PR;
+    }
+
+    return nrc;
+}
+
+static uint8_t __uds_svc_access_timing_parameters(uds_context_t *ctx,
+                                                  const struct timespec *timestamp,
+                                                  const uint8_t *data, size_t data_len,
+                                                  uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint8_t access_type = 0xFF;
+    size_t out_data_len = (*res_data_len - 1);
+    int ret = -1;
+
+    __UDS_UNUSED(timestamp);
+
+    if (data_len < 1)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else if (__uds_session_check(ctx, &ctx->config->access_timings_params.sec) != 0)
+    {
+        nrc = UDS_NRC_SFNSIAS;
+    }
+    else if (__uds_security_check(ctx, &ctx->config->access_timings_params.sec) != 0)
+    {
+        nrc = UDS_NRC_SAD;
+    }
+    else
+    {
+        access_type = __UDS_GET_SUBFUNCTION(data[0]);
+
+        nrc = UDS_NRC_PR;
+
+        switch (access_type)
+        {
+        case UDS_LEV_TPAT_RETPS:
+            ret = ctx->config->access_timings_params.cb_read_available(ctx->priv,
+                                                                       &res_data[1],
+                                                                       &out_data_len);
+            break;
+        case UDS_LEV_TPAT_STPTDV:
+            out_data_len = 0;
+            ret = ctx->config->access_timings_params.cb_set_default(ctx->priv);
+            break;
+        case UDS_LEV_TPAT_RCATP:
+            ret = ctx->config->access_timings_params.cb_read_current(ctx->priv,
+                                                                     &res_data[1],
+                                                                     &out_data_len);
+            break;
+        case UDS_LEV_TPAT_STPTGV:
+            if (data_len < 2)
+            {
+                nrc = UDS_NRC_IMLOIF;
+            }
+            else
+            {
+                out_data_len = 0;
+                ret = ctx->config->access_timings_params.cb_set_given(ctx->priv,
+                                                                      &data[1],
+                                                                      (data_len - 1));
+            }
+            break;
+        default:
+            nrc = UDS_NRC_SFNS;
+            break;
+        }
+
+        if (nrc != UDS_NRC_PR)
+        {
+            uds_warning(ctx, "access to timings parameters cannot be performed due to bad request");
+        }
+        else if (ret < 0)
+        {
+            uds_err(ctx, "cb for access_timings_params failed\n");
+            nrc = UDS_NRC_FPEORA;
+        }
+        else if (__UDS_SUPPRESS_PR(data[0]))
+        {
+            nrc = UDS_SPRMINB;
+        }
+        else
+        {
+            res_data[0] = access_type;
+            *res_data_len = 1 + out_data_len;
+        }
     }
 
     return nrc;
@@ -3437,6 +3522,8 @@ static int __uds_process_service(uds_context_t *ctx,
         break;
 
     case UDS_SVC_ATP:
+        nrc = __uds_svc_access_timing_parameters(ctx, timestamp, data, data_len,
+                                                 res_data, &res_data_len);
         break;
 
     case UDS_SVC_SDT:
