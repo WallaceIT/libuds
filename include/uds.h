@@ -181,6 +181,21 @@
 #define UDS_SBE_SACT_HIGH_SIDE_SWITCH       (2<<6)
 #define UDS_SBE_SACT_THREE_STATES_SWITCH    (3<<6)
 
+typedef enum {
+    UDS_CCACT_EN_RX_EN_TX       = 0x00,
+    UDS_CCACT_EN_RX_DIS_TX      = 0x01,
+    UDS_CCACT_DIS_RX_EN_TX      = 0x02,
+    UDS_CCACT_DIS_RX_DIS_TX     = 0x03,
+    UDS_CCACT_EN_RX_DIS_TX_EAI  = 0x04,
+    UDS_CCACT_EN_RX_EN_TX_EAI   = 0x05,
+} uds_cc_action_e;
+
+typedef enum {
+    UDS_CCMT_NONE = 0x00,
+    UDS_CCMT_NORMAL = 0x01,
+    UDS_CCMT_NETWORK_MANAGEMENT = 0x02,
+    UDS_CCMT_NETWORK_MANAGEMENT_AND_NORMAL = 0x03,
+} uds_cc_message_type_e;
 
 typedef enum {
     UDS_IOCP_RETURN_CONTROL_TO_ECU  = 0x00,
@@ -253,6 +268,14 @@ typedef struct __uds_config_ecureset
     int (*cb_reset_sss)(void *priv, uint8_t reset_type);
     uds_security_cfg_t sec_reset_sss;
 } uds_config_ecureset_t;
+
+typedef struct __uds_config_communication_control
+{
+    int (*cb_control)(void *priv, uds_cc_action_e action,
+                      uds_cc_message_type_e message_type,
+                      uint8_t subnet_address, uint16_t extended_address);
+    uds_security_cfg_t sec;
+} uds_config_communication_control_t;
 
 typedef struct __uds_config_dtc_settings
 {
@@ -427,6 +450,7 @@ typedef struct __uds_config
     unsigned long sa_delay_timer_ms;
 
     const uds_config_ecureset_t ecureset;
+    const uds_config_communication_control_t communication_control;
     const uds_config_dtc_settings_t dtc_settings;
 
     const uds_config_data_t *data_items;

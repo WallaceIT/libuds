@@ -108,6 +108,11 @@
 #define UDS_LEV_CTRLTP_ERXDTXWEAI   0x04 // Enable Rx And Disable TX With Enhanced Address Information
 #define UDS_LEV_CTRLTP_ERXTXWEAI    0x05 // Enable Rx And TX With Enhanced Address Information
 
+// Communication type (parameter of UDS_SVC_CC)
+#define UDS_CTP_NCM                 0x01 // Normal Communication Messages
+#define UDS_CTP_NWMCM               0x02 // Nextwork Management Communication Messages
+#define UDS_CTP_NWMCM_NCM           0x03 // Nextwork Management Communication Messages and Normal Messages
+
 // InputOutput Control Parameter (parameter of UDS_SVC_IOCBI)
 #define UDS_IOCP_RCTECU         0x00 // Return Control To ECU
 #define UDS_IOCP_RTD            0x01 // Reset To Default

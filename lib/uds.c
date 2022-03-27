@@ -706,6 +706,133 @@ static uint8_t __uds_svc_security_access(uds_context_t *ctx,
     return nrc;
 }
 
+
+static uint8_t __uds_svc_communication_control(uds_context_t *ctx,
+                                               const struct timespec *timestamp,
+                                               const uint8_t *data, size_t data_len,
+                                               uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint8_t ct = 0x00;
+    uds_cc_action_e action;
+    uds_cc_message_type_e message_type = UDS_CCMT_NONE;
+    uint8_t subnet_address = 0x00;
+    uint16_t enhanced_address = 0x0000;
+    int ret;
+
+    __UDS_UNUSED(timestamp);
+
+    if (data_len < 2)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else
+    {
+        ct = __UDS_GET_SUBFUNCTION(data[0]);
+
+        /* nrc will be checked after parsing of parameters */
+        nrc = UDS_NRC_PR;
+
+        switch (ct)
+        {
+        case UDS_LEV_CTRLTP_ERXTX:
+            action = UDS_CCACT_EN_RX_EN_TX;
+            break;
+        case UDS_LEV_CTRLTP_ERXDTX:
+            action = UDS_CCACT_EN_RX_DIS_TX;
+            break;
+        case UDS_LEV_CTRLTP_DRXETX:
+            action = UDS_CCACT_DIS_RX_EN_TX;
+            break;
+        case UDS_LEV_CTRLTP_DRXTX:
+            action = UDS_CCACT_DIS_RX_DIS_TX;
+            break;
+        case UDS_LEV_CTRLTP_ERXDTXWEAI:
+            if (data_len < 4)
+            {
+                nrc = UDS_NRC_IMLOIF;
+            }
+            else
+            {
+                action = UDS_CCACT_EN_RX_DIS_TX_EAI;
+                enhanced_address = __UDS_LOAD_UINT16_BIG_ENDIAN(&data[2]);
+            }
+            break;
+        case UDS_LEV_CTRLTP_ERXTXWEAI:
+            if (data_len < 4)
+            {
+                nrc = UDS_NRC_IMLOIF;
+            }
+            else
+            {
+                action = UDS_CCACT_EN_RX_EN_TX_EAI;
+                enhanced_address = __UDS_LOAD_UINT16_BIG_ENDIAN(&data[2]);
+            }
+            break;
+        default:
+            action = ct;
+            break;
+        }
+
+        switch (__UDS_LOW_NIBBLE(data[1]) & 0x03)
+        {
+        case UDS_CTP_NCM:
+            message_type = UDS_CCMT_NORMAL;
+            break;
+        case UDS_CTP_NWMCM:
+            message_type = UDS_CCMT_NETWORK_MANAGEMENT;
+            break;
+        case UDS_CTP_NWMCM_NCM:
+            message_type = UDS_CCMT_NETWORK_MANAGEMENT_AND_NORMAL;
+            break;
+        default:
+            nrc = UDS_NRC_ROOR;
+            break;
+        }
+
+        subnet_address = __UDS_HIGH_NIBBLE(data[1]);
+
+        if (nrc != UDS_NRC_PR)
+        {
+            uds_warning(ctx, "communication control cannot be performed due to bad request");
+        }
+        else if (__uds_session_check(ctx, &ctx->config->communication_control.sec) != 0)
+        {
+            nrc = UDS_NRC_SFNSIAS;
+        }
+        else if (__uds_security_check(ctx, &ctx->config->communication_control.sec) != 0)
+        {
+            nrc = UDS_NRC_SAD;
+        }
+        else
+        {
+            int ret;
+
+            ret = ctx->config->communication_control.cb_control(ctx->priv, action,
+                                                                message_type,
+                                                                subnet_address,
+                                                                enhanced_address);
+            if (ret < 0)
+            {
+                uds_err(ctx, "cb_control failed\n");
+                nrc = UDS_NRC_CNC;
+            }
+            else if (__UDS_SUPPRESS_PR(data[0]))
+            {
+                nrc = UDS_SPRMINB;
+            }
+            else
+            {
+                res_data[0] = ct;
+                *res_data_len = 1;
+                nrc = UDS_NRC_PR;
+            }
+        }
+    }
+
+    return nrc;
+}
+
 static uint8_t __uds_svc_tester_present(uds_context_t *ctx,
                                         const struct timespec *timestamp,
                                         const uint8_t *data, size_t data_len,
@@ -3300,6 +3427,8 @@ static int __uds_process_service(uds_context_t *ctx,
         break;
 
     case UDS_SVC_CC:
+        nrc = __uds_svc_communication_control(ctx, timestamp, data, data_len,
+                                              res_data, &res_data_len);
         break;
 
     case UDS_SVC_TP:
