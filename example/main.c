@@ -321,15 +321,22 @@ static int sa_request_seed(void *priv, const uint8_t sa_index,
                            const uint8_t in_data[], size_t in_data_len,
                            uint8_t out_seed[], size_t *out_seed_len)
 {
+    (void)priv;
+    (void)sa_index; (void)in_data; (void)in_data_len; (void)sa_index;
+
     out_seed[0] = 0xAA;
     out_seed[1] = 0xDE;
     *out_seed_len = 2;
+
     return 0;
 }
 
 static int sa_validate_key(void *priv, const uint8_t sa_index,
                            const uint8_t key[], size_t key_len)
 {
+    (void)priv;
+    (void)sa_index; (void)key; (void)key_len;
+
     return 0;
 }
 
@@ -407,12 +414,18 @@ static const uds_config_data_t data_items[] =
 static int mem_region_read(void *priv, const uintptr_t address,
                            uint8_t *data, const size_t data_len)
 {
+    (void)priv;
+    (void)address; (void)data; (void)data_len;
+
     return 0;
 }
 
 static int mem_region_write(void *priv, const uintptr_t address,
                             const uint8_t *data, const size_t data_len)
 {
+    (void)priv;
+    (void)address; (void)data; (void)data_len;
+
     return 0;
 }
 
@@ -421,17 +434,26 @@ static int mem_region_download_request(void *priv, const uintptr_t address,
                                        const uint8_t compression_method,
                                        const uint8_t encrypting_method)
 {
+    (void)priv;
+    (void)address; (void)data_len;
+    (void)compression_method; (void)encrypting_method;
+
     return 0;
 }
 
 static int mem_region_download(void *priv, const uintptr_t address,
                                const uint8_t *data, const size_t data_len)
 {
+    (void)priv;
+    (void)address; (void)data; (void)data_len;
+
     return 0;
 }
 
 static int mem_region_download_exit(void *priv)
 {
+    (void)priv;
+
     return 0;
 }
 
@@ -469,6 +491,10 @@ static int file_transfer_open(void *priv, const char *filepath, size_t filepath_
 {
     intptr_t tmp_fd = -1;
     int ret = 0;
+
+    (void)priv;
+    (void)compression_method;
+    (void)encrypting_method;
 
     memcpy(buf_path, filepath, filepath_len);
     buf_path[filepath_len] = '\0';
@@ -526,19 +552,18 @@ static int file_transfer_open(void *priv, const char *filepath, size_t filepath_
 
 static int file_transfer_list(void *priv, intptr_t fd, size_t offset, void *buf, size_t *count)
 {
-    DIR *d = (DIR *)fd;
-    struct dirent *dir = NULL;
     int ret = 0;
 
-    while (0)
-        ;
+    (void)priv; (void)fd; (void)offset; (void)buf; (void)count;
 
     return ret;
 }
 
 static int file_transfer_read(void *priv, intptr_t fd, size_t offset, void *buf, size_t *count)
 {
-    int ret = 0;
+    ssize_t ret = 0;
+
+    (void)priv;
 
     if (cur_offset != offset)
     {
@@ -561,7 +586,9 @@ static int file_transfer_read(void *priv, intptr_t fd, size_t offset, void *buf,
 
 static int file_transfer_write(void *priv, intptr_t fd, size_t offset, const void *buf, size_t count)
 {
-    int ret = 0;
+    ssize_t ret = 0;
+
+    (void)priv;
 
     if (cur_offset != offset)
     {
@@ -571,7 +598,7 @@ static int file_transfer_write(void *priv, intptr_t fd, size_t offset, const voi
     if (ret == 0)
     {
         ret = write(fd, buf, count);
-        if (ret == count)
+        if (ret == (ssize_t)count)
         {
             cur_offset = (offset + count);
             ret = 0;
@@ -584,6 +611,8 @@ static int file_transfer_write(void *priv, intptr_t fd, size_t offset, const voi
 static int file_transfer_close(void *priv, uds_file_mode_e mode, intptr_t fd)
 {
     int ret = 0;
+
+    (void)priv;
 
     if (mode == UDS_FILE_MODE_LIST_DIR)
     {
@@ -600,6 +629,8 @@ static int file_transfer_close(void *priv, uds_file_mode_e mode, intptr_t fd)
 
 static int file_transfer_delete(void *priv, const char *filepath, size_t filepath_len)
 {
+    (void)priv;
+
     memcpy(buf_path, filepath, filepath_len);
     buf_path[filepath_len] = '\0';
 
@@ -631,6 +662,7 @@ static const uds_config_t uds_config =
         .cb_read = file_transfer_read,
         .cb_write = file_transfer_write,
         .cb_close = file_transfer_close,
+        .cb_delete = file_transfer_delete,
         .sec.sa_type_mask = UDS_CFG_SA_TYPE_NONE,
         .sec.standard_session_mask = UDS_CFG_SESSION_MASK(0x02),
         .max_block_len = 512,
@@ -645,8 +677,6 @@ static const uds_config_t uds_config =
 int main(int argc, char *argv[])
 {
     const char *can_iface = "vcan0";
-
-    uint32_t v_tmp[4];
 
     uds_context_t uds_ctx;
     uint8_t uds_buffer[4095];
@@ -672,7 +702,6 @@ int main(int argc, char *argv[])
 
     bool run = true;
     int i = 0;
-    int ret;
 
     // Parse command line arguments
     while ((i = getopt_long(argc, argv, "c:h", lopts, NULL)) >= 0)
@@ -870,6 +899,15 @@ int main(int argc, char *argv[])
     }
 
     fprintf(stderr, "Exiting...\n");
+
+    close(epollfd);
+
+    signal_management_deinit(fd_signals);
+
+    can_tp_deinit(private_data.fd_can_tp_func);
+    can_tp_deinit(private_data.fd_can_tp_phys);
+
+    timer_deinit(fd_timer_uds);
 
     return 0;
 }

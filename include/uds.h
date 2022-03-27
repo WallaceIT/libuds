@@ -2,7 +2,9 @@
 #ifndef __UDS_H
 #define __UDS_H
 
+#include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 #define UDS_CFG_SA_TYPE_NONE        (0x0000000000000000UL)
 #define UDS_CFG_SA_TYPE_ALL         (0xFFFFFFFFFFFFFFFFUL)
