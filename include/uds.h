@@ -400,6 +400,16 @@ typedef struct __uds_config_dtc_information
 
 } uds_config_dtc_information_t;
 
+typedef struct __uds_config_link_control
+{
+    int (*cb_verify_mode_fixed)(void *priv, uint8_t link_control_mode);
+    int (*cb_verify_mode_specified)(void *priv, const uint8_t *data, const size_t data_len);
+    int (*cb_transition_mode)(void *priv);
+    int (*cb_specific)(void *priv, uint8_t link_control_type,
+                       const uint8_t *data, const size_t data_len);
+    uds_security_cfg_t sec;
+} uds_config_link_control_t;
+
 typedef struct __uds_config_file_access
 {
     int (*cb_open)(void *priv, const char *filepath, size_t filepath_len,
@@ -474,6 +484,8 @@ typedef struct __uds_config
 
     const uds_config_dtc_information_t dtc_information;
 
+    const uds_config_link_control_t link_control;
+
     const uds_config_file_access_t file_transfer;
 
     const uds_config_routine_t *routines;
@@ -503,6 +515,11 @@ typedef struct __uds_context
     const uds_sa_cfg_t *current_sa;
     unsigned long sa_failed_attempts;
     struct timespec sa_delay_timer_timestamp;
+
+    struct
+    {
+        uint8_t mode_verified;
+    } link_control;
 
     struct
     {

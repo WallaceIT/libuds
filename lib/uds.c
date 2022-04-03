@@ -1086,6 +1086,147 @@ static uint8_t __uds_svc_control_dtc_settings(uds_context_t *ctx,
     return nrc;
 }
 
+static uint8_t __uds_svc_link_control(uds_context_t *ctx,
+                                      const struct timespec *timestamp,
+                                      const uint8_t *data, size_t data_len,
+                                      uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_GR;
+    uint8_t link_control_type = 0x00;
+    int ret = -1;
+
+    __UDS_UNUSED(timestamp);
+
+    if (data_len < 1)
+    {
+        nrc = UDS_NRC_IMLOIF;
+    }
+    else if (__uds_session_check(ctx, &ctx->config->link_control.sec) != 0)
+    {
+        nrc = UDS_NRC_SFNSIAS;
+    }
+    else if (__uds_security_check(ctx, &ctx->config->link_control.sec) != 0)
+    {
+        nrc = UDS_NRC_SAD;
+    }
+    else
+    {
+        link_control_type = __UDS_GET_SUBFUNCTION(data[0]);
+
+        switch (link_control_type)
+        {
+        case UDS_LEV_LCTP_VMTWFP:
+            if (ctx->config->link_control.cb_verify_mode_fixed == NULL)
+            {
+                nrc = UDS_NRC_SFNS;
+            }
+            else if (data_len < 2)
+            {
+                nrc = UDS_NRC_IMLOIF;
+            }
+            else
+            {
+                ret = ctx->config->link_control.cb_verify_mode_fixed(ctx->priv, data[1]);
+                if (ret < 0)
+                {
+                    nrc = UDS_NRC_CNC;
+                }
+                else
+                {
+                    ctx->link_control.mode_verified = 1;
+                    nrc = UDS_NRC_PR;
+                }
+            }
+            break;
+        case UDS_LEV_LCTP_VMTWSP:
+            if (ctx->config->link_control.cb_verify_mode_specified == NULL)
+            {
+                nrc = UDS_NRC_SFNS;
+            }
+            else if (data_len < 2)
+            {
+                nrc = UDS_NRC_IMLOIF;
+            }
+            else
+            {
+                ret = ctx->config->link_control.cb_verify_mode_specified(ctx->priv,
+                                                                         &data[1],
+                                                                         (data_len - 1));
+                if (ret < 0)
+                {
+                    nrc = UDS_NRC_CNC;
+                }
+                else
+                {
+                    ctx->link_control.mode_verified = 1;
+                    nrc = UDS_NRC_PR;
+                }
+            }
+            break;
+        case UDS_LEV_LCTP_TM:
+            if (ctx->config->link_control.cb_transition_mode == NULL)
+            {
+                nrc = UDS_NRC_SFNS;
+            }
+            else if (ctx->link_control.mode_verified == 0)
+            {
+                nrc = UDS_NRC_RSE;
+            }
+            else
+            {
+                ret = ctx->config->link_control.cb_transition_mode(ctx->priv);
+                if (ret < 0)
+                {
+                    nrc = UDS_NRC_CNC;
+                }
+                else
+                {
+                    nrc = UDS_NRC_PR;
+                }
+            }
+            ctx->link_control.mode_verified = 0;
+            break;
+        default:
+            if (ctx->config->link_control.cb_specific == NULL)
+            {
+                nrc = UDS_NRC_SFNS;
+            }
+            else
+            {
+                ret = ctx->config->link_control.cb_specific(ctx->priv,
+                                                            link_control_type,
+                                                            &data[1],
+                                                            (data_len - 1));
+                if (ret < 0)
+                {
+                    nrc = UDS_NRC_CNC;
+                }
+                else
+                {
+                    nrc = UDS_NRC_PR;
+                }
+            }
+            break;
+        }
+    }
+
+    if (nrc == UDS_NRC_PR)
+    {
+        if (__UDS_SUPPRESS_PR(data[0]))
+        {
+            nrc = UDS_SPRMINB;
+        }
+        else
+        {
+            res_data[0] = link_control_type;
+            *res_data_len = 1;
+        }
+    }
+
+
+    return nrc;
+}
+
 static uint8_t __uds_svc_read_data_by_identifier(uds_context_t *ctx,
                                                  const struct timespec *timestamp,
                                                  const uint8_t *data, size_t data_len,
@@ -3538,6 +3679,8 @@ static int __uds_process_service(uds_context_t *ctx,
         break;
 
     case UDS_SVC_LC:
+        nrc = __uds_svc_link_control(ctx, timestamp, data, data_len,
+                                     res_data, &res_data_len);
         break;
 
     /* Data Transmission */
