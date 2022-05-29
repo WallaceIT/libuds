@@ -678,7 +678,7 @@ int main(int argc, char *argv[])
 {
     const char *can_iface = "vcan0";
 
-    uds_context_t uds_ctx;
+    uds_context_t * uds_ctx;
     uint8_t uds_buffer[4095];
 
     int fd_timer_uds = -1;
@@ -731,7 +731,14 @@ int main(int argc, char *argv[])
     }
 
     // Intialize UDS library
-    uds_init(&uds_ctx, &uds_config, uds_buffer, sizeof(uds_buffer), &private_data, &now);
+    uds_ctx = uds_create_context();
+    if (uds_ctx == NULL)
+    {
+        fprintf(stderr, "Failed to create UDS context\n");
+        exit(EXIT_FAILURE);
+    }
+
+    uds_init(uds_ctx, &uds_config, uds_buffer, sizeof(uds_buffer), &private_data, &now);
 
     // Create poller
     epollfd = epoll_create1(0);
@@ -865,7 +872,7 @@ int main(int argc, char *argv[])
                 size_t size = sizeof(can_tp_phys_buf);
                 if (can_tp_receive(private_data.fd_can_tp_phys, can_tp_phys_buf, &size) == 0)
                 {
-                    if (uds_receive(&uds_ctx, UDS_ADDRESS_PHYSICAL, can_tp_phys_buf, size, &now) != 0)
+                    if (uds_receive(uds_ctx, UDS_ADDRESS_PHYSICAL, can_tp_phys_buf, size, &now) != 0)
                     {
                         fprintf(stderr, "Failed to send to CAN-ISOTP\n");
                     }
@@ -880,7 +887,7 @@ int main(int argc, char *argv[])
                 size_t size = sizeof(can_tp_func_buf);
                 if (can_tp_receive(private_data.fd_can_tp_func, can_tp_func_buf, &size) == 0)
                 {
-                    if (uds_receive(&uds_ctx, UDS_ADDRESS_FUNCTIONAL, can_tp_func_buf, size, &now) != 0)
+                    if (uds_receive(uds_ctx, UDS_ADDRESS_FUNCTIONAL, can_tp_func_buf, size, &now) != 0)
                     {
                         fprintf(stderr, "Failed to send to CAN-ISOTP\n");
                     }
@@ -893,7 +900,7 @@ int main(int argc, char *argv[])
             else if (triggered_fd == fd_timer_uds)
             {
                 timer_reset(fd_timer_uds);
-                uds_cycle(&uds_ctx, &now);
+                uds_cycle(uds_ctx, &now);
             }
         }
     }
@@ -908,6 +915,8 @@ int main(int argc, char *argv[])
     can_tp_deinit(private_data.fd_can_tp_phys);
 
     timer_deinit(fd_timer_uds);
+
+    uds_destroy_context(uds_ctx);
 
     return 0;
 }

@@ -6,6 +6,8 @@
 #include <time.h>
 
 #include "uds.h"
+#include "uds_config.h"
+#include "uds_context.h"
 #include "uds_log.h"
 
 #include "iso14229_part1.h"
@@ -3849,6 +3851,17 @@ static long int timespec_elapsed_ms(const struct timespec *stop,
     return ret;
 }
 
+uds_context_t * uds_create_context(void)
+{
+    uds_context_t *ctx = calloc(1, sizeof(uds_context_t));
+    return ctx;
+}
+
+void uds_destroy_context(uds_context_t * ctx)
+{
+    free(ctx);
+}
+
 int uds_init(uds_context_t *ctx, const uds_config_t *config,
              uint8_t *response_buffer, size_t response_buffer_len, void *priv,
              const struct timespec *timestamp)
@@ -3891,12 +3904,6 @@ int uds_init(uds_context_t *ctx, const uds_config_t *config,
     }
 
     return ret;
-}
-
-void uds_deinit(uds_context_t *ctx)
-{
-    __UDS_UNUSED(ctx);
-    return;
 }
 
 int uds_receive(uds_context_t *ctx, uds_address_e addr_type,
