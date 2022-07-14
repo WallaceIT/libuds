@@ -1,10 +1,9 @@
 
-#ifndef __UDS_CONTEXT_H
-#define __UDS_CONTEXT_H
+#ifndef UDS_CONTEXT_H__
+#define UDS_CONTEXT_H__
 
 #include <stddef.h>
 #include <stdint.h>
-#include <time.h>
 
 #include <uds.h>
 #include <uds_config.h>
@@ -64,4 +63,4 @@ typedef struct __uds_context
     size_t response_buffer_len;
 } uds_context_t;
 
-#endif // __UDS_CONTEXT_H
+#endif // UDS_CONTEXT_H__

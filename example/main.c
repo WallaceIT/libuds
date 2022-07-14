@@ -2,7 +2,6 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <getopt.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -24,6 +23,7 @@
 #include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/timerfd.h>
 #include <sys/un.h>
 
@@ -105,7 +105,7 @@ static void can_tp_deinit(int fd)
     }
 }
 
-static int can_tp_receive(int fd, void *buffer, size_t *size)
+static int can_tp_receive(int fd, uint8_t *buffer, size_t *size)
 {
     ssize_t ret = 0;
 
@@ -123,7 +123,7 @@ static int can_tp_receive(int fd, void *buffer, size_t *size)
     return (ret < 0) ? -1 : 0;
 }
 
-static int can_tp_send(int fd, void *buffer, size_t *size)
+static int can_tp_send(int fd, const uint8_t *buffer, size_t *size)
 {
     ssize_t ret = 0;
 
@@ -193,25 +193,6 @@ static int timer_reset(int fd)
     return ret;
 }
 
-static int __attribute__((unused)) timer_reset_modify(int fd, long microseconds)
-{
-    const struct itimerspec timer = {
-        { .tv_sec = (microseconds / 1000000), .tv_nsec = (microseconds % 1000000) * 1000 },
-        { .tv_sec = (microseconds / 1000000), .tv_nsec = (microseconds % 1000000) * 1000 },
-    };
-    int ret;
-
-    timer_reset(fd);
-
-    ret = timerfd_settime(fd, 0, &timer, NULL);
-    if (ret != 0)
-    {
-        fprintf(stderr, "Failed to modify timer: %s\n", strerror(errno));
-    }
-
-    return ret;
-}
-
 static int signal_management_handle(int signo, bool *terminate)
 {
     switch (signo)
@@ -263,17 +244,11 @@ static void signal_management_deinit(int fd)
     }
 }
 
-static const struct option lopts[] =
-{
-    { "can",            1, 0, 'c' },
-    { NULL,             0, 0,  0  },
-};
-
 static void print_usage(const char *prog)
 {
-    printf("Usage: %s [-dh] [-c <interface>] [-m <num>]\n", prog);
-    printf("    -c,--can <interface>   : can interface to use (default: can0)\n");
-    printf("    -h,--help              : show this help and exit\n");
+    printf("Usage: %s [-h] [-c <interface>]\n", prog);
+    printf("    -c <interface>   : CAN interface to use (default: can0)\n");
+    printf("    -h               : show this help and exit\n");
 }
 
 static const uds_session_cfg_t uds_sessions[] =
@@ -312,7 +287,7 @@ static int uds_send_callback(void *priv, const uint8_t data[], size_t len)
     size_t int_len = len;
     int ret;
 
-    ret = can_tp_send(private_data->fd_can_tp_phys, (void *)data, &int_len);
+    ret = can_tp_send(private_data->fd_can_tp_phys, data, &int_len);
 
     return ret;
 }
@@ -702,9 +677,10 @@ int main(int argc, char *argv[])
 
     bool run = true;
     int i = 0;
+    int ret = 0;
 
     // Parse command line arguments
-    while ((i = getopt_long(argc, argv, "c:h", lopts, NULL)) >= 0)
+    while ((i = getopt(argc, argv, "c:h")) >= 0)
     {
         switch (i)
         {
@@ -714,20 +690,18 @@ int main(int argc, char *argv[])
 
         case 'h':
             print_usage(argv[0]);
-            exit(EXIT_SUCCESS);
-            break;
+            return 0;
 
         default:
             print_usage(argv[0]);
-            exit(EXIT_FAILURE);
-            break;
+            return -1;
         }
     }
 
     if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
     {
         fprintf(stderr, "clock_gettime failed: %s\n", strerror(errno));
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
     // Intialize UDS library
@@ -735,17 +709,23 @@ int main(int argc, char *argv[])
     if (uds_ctx == NULL)
     {
         fprintf(stderr, "Failed to create UDS context\n");
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
-    uds_init(uds_ctx, &uds_config, uds_buffer, sizeof(uds_buffer), &private_data, &now);
+    ret = uds_init(uds_ctx, &uds_config, uds_buffer, sizeof(uds_buffer),
+                   &private_data, &now);
+    if (ret != 0)
+    {
+        fprintf(stderr, "Failed to initialize UDS library\n");
+        return -1;
+    }
 
     // Create poller
     epollfd = epoll_create1(0);
     if (epollfd == -1)
     {
         fprintf(stderr, "Cannot create epoll: %s\n", strerror(errno));
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
     // Init signal listener fd

@@ -1,28 +1,26 @@
 
-#ifndef __UDS_LOG_H
-#define __UDS_LOG_H
+#ifndef UDS_LOG_H__
+#define UDS_LOG_H__
 
 #include <stdio.h>
 
 #include "uds.h"
 
-enum {
-    UDS_LOG_EMERG = 0,
-    UDS_LOG_ALERT = 1,
-    UDS_LOG_CRIT = 2,
-    UDS_LOG_ERR = 3,
-    UDS_LOG_WARNING = 4,
-    UDS_LOG_NOTICE = 5,
-    UDS_LOG_INFO = 6,
-    UDS_LOG_DEBUG = 7,
-};
+#define UDS_LOG_EMERG   0
+#define UDS_LOG_ALERT   1
+#define UDS_LOG_CRIT    2
+#define UDS_LOG_ERR     3
+#define UDS_LOG_WARNING 4
+#define UDS_LOG_NOTICE  5
+#define UDS_LOG_INFO    6
+#define UDS_LOG_DEBUG   7
 
 #define uds_log(ctx, level, ...) \
 do { \
     const uds_context_t *_ctx = ctx; \
     if (_ctx->loglevel >= level) \
     { \
-        fprintf(stderr, "libuds: " __VA_ARGS__); \
+        (void)fprintf(stderr, "libuds: " __VA_ARGS__); \
     } \
 } while (0)
 
@@ -36,4 +34,4 @@ do { \
 #define uds_info(ctx, ...) uds_log(ctx, UDS_LOG_INFO, __VA_ARGS__)
 #define uds_debug(ctx, ...) uds_log(ctx, UDS_LOG_DEBUG, __VA_ARGS__)
 
-#endif // __UDS_LOG_H
+#endif // UDS_LOG_H__

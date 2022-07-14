@@ -1,10 +1,9 @@
 
-#ifndef __UDS_H
-#define __UDS_H
+#ifndef UDS_H__
+#define UDS_H__
 
 #include <stddef.h>
 #include <stdint.h>
-#include <time.h>
 
 #define UDS_CFG_SA_TYPE_NONE        (0x0000000000000000UL)
 #define UDS_CFG_SA_TYPE_ALL         (0xFFFFFFFFFFFFFFFFUL)
@@ -512,4 +511,4 @@ int uds_receive(uds_context_t *ctx, const uds_address_e addr_type,
 int uds_cycle(uds_context_t *ctx, const struct timespec *timestamp);
 void uds_reset_sa_delay_timer(uds_context_t *ctx);
 
-#endif // __UDS_H
+#endif // UDS_H__
