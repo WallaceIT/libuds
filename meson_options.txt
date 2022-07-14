@@ -1,0 +1,1 @@
+option('uds_periodic_slots', type : 'integer', min: 0, value : 10, description : 'Number of slots for periodic Data Identifiers')
