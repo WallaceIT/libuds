@@ -1,5 +1,6 @@
 
 project('uds', 'c',
+        version : '0.0.1',
         license : 'MIT',
         default_options: ['buildtype=debugoptimized',
                           'default_library=shared',
