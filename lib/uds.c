@@ -1,17 +1,38 @@
 
 #include <stddef.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#include "uds.h"
-#include "uds_config.h"
-#include "uds_context.h"
-#include "uds_log.h"
+#include "uds/uds.h"
+#include "uds/uds_config.h"
+#include "uds/uds_context.h"
 
 #include "iso14229_part1.h"
 
+// Logging
+#define uds_log(ctx, level, ...) \
+do { \
+    const uds_context_t *_ctx = ctx; \
+    if (_ctx->loglevel >= level) \
+    { \
+        (void)fprintf(stderr, "libuds: " __VA_ARGS__); \
+    } \
+} while (0)
+
+#define uds_emerg(ctx, ...)     uds_log(ctx, UDS_LOGLVL_EMERG, __VA_ARGS__)
+#define uds_alert(ctx, ...)     uds_log(ctx, UDS_LOGLVL_ALERT, __VA_ARGS__)
+#define uds_crit(ctx, ...)      uds_log(ctx, UDS_LOGLVL_CRIT, __VA_ARGS__)
+#define uds_err(ctx, ...)       uds_log(ctx, UDS_LOGLVL_ERR, __VA_ARGS__)
+#define uds_warning(ctx, ...)   uds_log(ctx, UDS_LOGLVL_WARNING, __VA_ARGS__)
+#define uds_notice(ctx, ...)    uds_log(ctx, UDS_LOGLVL_NOTICE, __VA_ARGS__)
+#define uds_notice(ctx, ...)    uds_log(ctx, UDS_LOGLVL_NOTICE, __VA_ARGS__)
+#define uds_info(ctx, ...)      uds_log(ctx, UDS_LOGLVL_INFO, __VA_ARGS__)
+#define uds_debug(ctx, ...)     uds_log(ctx, UDS_LOGLVL_DEBUG, __VA_ARGS__)
+
+// Macros
 #define UDS_UNUSED(x) ((void)(x))
 
 #define UDS_GET_SUBFUNCTION(x)      ((x) & (~UDS_SPRMINB))
@@ -3806,8 +3827,7 @@ static int __uds_process_service(uds_context_t *ctx,
 
 static int __uds_init(uds_context_t *ctx, const uds_config_t *config,
                       uint8_t *response_buffer, size_t response_buffer_len,
-                      void *priv, unsigned int loglevel,
-                      const struct timespec *timestamp)
+                      void *priv, const struct timespec *timestamp)
 {
     int ret = 0;
 
@@ -3818,7 +3838,7 @@ static int __uds_init(uds_context_t *ctx, const uds_config_t *config,
     ctx->response_buffer = response_buffer;
     ctx->response_buffer_len = response_buffer_len;
     ctx->priv = priv;
-    ctx->loglevel = loglevel;
+    ctx->loglevel = UDS_LOGLVL_WARNING;
     ctx->current_sa_seed = UDS_INVALID_SA_INDEX;
     ctx->sa_failed_attempts = config->sa_max_attempts;
 
@@ -3850,31 +3870,11 @@ static long int timespec_elapsed_ms(const struct timespec *stop,
     return ret;
 }
 
-uds_context_t * uds_create_context(void)
-{
-    uds_context_t *ctx = calloc(1, sizeof(uds_context_t));
-    return ctx;
-}
-
-void uds_destroy_context(uds_context_t * ctx)
-{
-    free(ctx);
-}
-
 int uds_init(uds_context_t *ctx, const uds_config_t *config,
              uint8_t *response_buffer, size_t response_buffer_len, void *priv,
              const struct timespec *timestamp)
 {
-    const char *env_tmp = NULL;
-    unsigned int loglevel = 4;
     int ret = -1;
-
-    // Parse environment options
-    env_tmp = getenv("LIBUDS_DEBUG");
-    if ((env_tmp != NULL) && (env_tmp[0] >= '0') && (env_tmp[0] <= '9'))
-    {
-        loglevel = env_tmp[0] - '0';
-    }
 
     if (ctx == NULL)
     {
@@ -3898,10 +3898,18 @@ int uds_init(uds_context_t *ctx, const uds_config_t *config,
     else
     {
         ret = __uds_init(ctx, config, response_buffer, response_buffer_len,
-                         priv, loglevel, timestamp);
+                         priv, timestamp);
     }
 
     return ret;
+}
+
+void uds_set_loglevel(uds_context_t *ctx, uds_loglevel_e level)
+{
+    if (ctx != NULL)
+    {
+        ctx->loglevel = level;
+    }
 }
 
 int uds_receive(uds_context_t *ctx, uds_address_e addr_type,

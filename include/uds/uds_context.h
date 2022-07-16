@@ -5,8 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <uds.h>
-#include <uds_config.h>
+#include <uds/uds_types.h>
+#include <uds/uds_config.h>
 
 typedef enum __uds_data_transfer_dir
 {
@@ -25,7 +25,7 @@ typedef struct __uds_context
 
     struct timespec last_message_timestamp;
 
-    unsigned int loglevel;
+    uds_loglevel_e loglevel;
     const uds_session_cfg_t *current_session;
     uint8_t current_sa_seed;
     const uds_sa_cfg_t *current_sa;

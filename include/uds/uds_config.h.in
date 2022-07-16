@@ -2,6 +2,6 @@
 #ifndef UDS_CONFIG_H__
 #define UDS_CONFIG_H__
 
-#define UDS_CONFIG_NUM_PERIODIC_SLOTS @uds_periodic_slots@
+#define UDS_CONFIG_NUM_PERIODIC_SLOTS @UDS_CONFIG_NUM_PERIODIC_SLOTS@
 
 #endif // UDS_CONFIG_H__
