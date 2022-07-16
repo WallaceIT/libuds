@@ -32,6 +32,12 @@ do { \
 #define uds_info(ctx, ...)      uds_log(ctx, UDS_LOGLVL_INFO, __VA_ARGS__)
 #define uds_debug(ctx, ...)     uds_log(ctx, UDS_LOGLVL_DEBUG, __VA_ARGS__)
 
+#ifdef UDS_CONFIG_ENABLE_TRACING
+#define uds_trace(ctx, ...)     uds_log(ctx, UDS_LOGLVL_TRACE, __VA_ARGS__)
+#else
+#define uds_trace(ctx, ...)
+#endif
+
 // Macros
 #define UDS_UNUSED(x) ((void)(x))
 
@@ -136,6 +142,8 @@ static inline uint8_t __uds_sat_to_sa_index(const uint8_t sat)
 static inline void __uds_switch_to_session(uds_context_t *ctx,
                                            const uds_session_cfg_t *session)
 {
+    uds_trace(ctx, "%s(0x%02X)\n", __func__, session->session_type);
+
     ctx->current_session = session;
     if (NULL != ctx->config->cb_notify_session_change)
     {
@@ -145,6 +153,8 @@ static inline void __uds_switch_to_session(uds_context_t *ctx,
 
 static void __uds_reset_to_default_session(uds_context_t *ctx)
 {
+    uds_trace(ctx, "%s()\n", __func__);
+
     unsigned int s = 0U;
     for (s = 0; s < ctx->config->num_session_config; s++)
     {
@@ -168,6 +178,8 @@ static void __uds_reset_to_default_session(uds_context_t *ctx)
 
 static inline void __uds_activate_sa(uds_context_t *ctx, const uds_sa_cfg_t *sa)
 {
+    uds_trace(ctx, "%s(0x%02X)\n", __func__, sa->sa_index);
+
     ctx->current_sa = sa;
     if (NULL != ctx->config->cb_notify_sa_change)
     {
@@ -185,6 +197,7 @@ static inline void __uds_activate_sa(uds_context_t *ctx, const uds_sa_cfg_t *sa)
 
 static inline void __uds_reset_secure_access(uds_context_t *ctx)
 {
+    uds_trace(ctx, "%s()\n", __func__);
     __uds_activate_sa(ctx, NULL);
 }
 
@@ -193,6 +206,9 @@ static inline int __uds_sa_vs_session_check(uds_context_t *ctx,
                                             const uds_session_cfg_t *session_config)
 {
     int ret = -1;
+
+    uds_trace(ctx, "%s(sa=0x%02X, session=0x%02X)\n", __func__,
+              sa_config->sa_index, session_config->session_type);
 
     uds_debug(ctx, "sa_vs_session_check with sa = %d and session = 0x%02X\n",
               ((NULL != sa_config) ? sa_config->sa_index : -1),
@@ -211,6 +227,7 @@ static int __uds_session_check(uds_context_t *ctx, const uds_security_cfg_t* cfg
 {
     int ret = -1;
 
+    uds_trace(ctx, "%s()\n", __func__);
     uds_debug(ctx, "session_check with active session = 0x%02X (st = 0x%016lX, sp = 0x%016lX)\n",
               ctx->current_session->session_type,
               cfg->standard_session_mask, cfg->specific_session_mask);
@@ -242,6 +259,7 @@ static int __uds_security_check(uds_context_t *ctx, const uds_security_cfg_t* cf
 {
     int ret = -1;
 
+    uds_trace(ctx, "%s()\n", __func__);
     uds_debug(ctx, "security_check with current sa_index = %d\n",
               (NULL != ctx->current_sa) ? ctx->current_sa->sa_index : -1);
     uds_debug(ctx, "sa_tm = 0x%08X\n", cfg->sa_type_mask);
@@ -276,18 +294,6 @@ static inline int __uds_session_and_security_check(uds_context_t *ctx, const uds
     return ret;
 }
 
-static inline int __uds_data_transfer_active(uds_context_t *ctx)
-{
-    int ret = -1;
-
-    if (UDS_DATA_TRANSFER_NONE != ctx->data_transfer.direction)
-    {
-        ret = 0;
-    }
-
-    return ret;
-}
-
 static inline void __uds_data_transfer_reset(uds_context_t *ctx)
 {
     uds_info(ctx, "data transfer reset\n");
@@ -304,6 +310,8 @@ static inline void __uds_data_transfer_reset(uds_context_t *ctx)
 static int __uds_send(uds_context_t *ctx, const uint8_t *data, size_t len)
 {
     int ret = 0;
+
+    uds_trace(ctx, "%s(len=%lu)\n", __func__, len);
 
     if (NULL == ctx->config->cb_send)
     {
@@ -385,6 +393,8 @@ static uint8_t __uds_svc_session_control(uds_context_t *ctx,
             *res_data_len = 5;
         }
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -579,6 +589,8 @@ static uint8_t __uds_svc_ecu_reset(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -751,6 +763,8 @@ static uint8_t __uds_svc_security_access(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -876,6 +890,8 @@ static uint8_t __uds_svc_communication_control(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -907,6 +923,8 @@ static uint8_t __uds_svc_tester_present(uds_context_t *ctx,
         *res_data_len = 1U;
         nrc = UDS_NRC_PR;
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -993,6 +1011,8 @@ static uint8_t __uds_svc_access_timing_parameters(uds_context_t *ctx,
             *res_data_len = 1U + out_data_len;
         }
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -1128,6 +1148,8 @@ static uint8_t __uds_svc_control_dtc_settings(uds_context_t *ctx,
             }
         }
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -1269,6 +1291,7 @@ static uint8_t __uds_svc_link_control(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -1388,6 +1411,8 @@ static uint8_t __uds_svc_read_data_by_identifier(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -1496,6 +1521,8 @@ static uint8_t __uds_svc_read_memory_by_address(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -1561,6 +1588,8 @@ static uint8_t __uds_svc_read_scaling_data_by_identifier(uds_context_t *ctx,
             }
         }
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -1630,6 +1659,8 @@ static uint8_t __uds_svc_write_data_by_identifier(uds_context_t *ctx,
             }
         }
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -1747,6 +1778,8 @@ static uint8_t __uds_svc_write_memory_by_address(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -1830,6 +1863,8 @@ static uint8_t __uds_svc_io_control_by_identifier(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -1892,6 +1927,8 @@ static uint8_t __uds_svc_clear_diagnostic_information(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -1944,6 +1981,8 @@ static uint8_t __uds_rdtci_report_number_of_dtc_by_status_mask(uds_context_t *ct
         __uds_store_big_endian(&res_data[2], number_of_dtc, 2U);
         *res_data_len = 4;
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -1998,6 +2037,8 @@ static uint8_t __uds_rdtci_report_dtc_by_status_mask(uds_context_t *ctx,
         *res_data_len = 1U + (dtc_data - &res_data[1]);
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -2044,6 +2085,8 @@ static uint8_t __uds_rdtci_report_dtc_snapshot_identification(uds_context_t *ctx
         nrc = UDS_NRC_PR;
         *res_data_len = (out_data - res_data);
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -2151,6 +2194,8 @@ static uint8_t __uds_rdtci_report_dtc_snapshot_record(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -2218,6 +2263,8 @@ static uint8_t __uds_rdtci_report_dtc_stored_data(uds_context_t *ctx,
         }
         *res_data_len = used_data_len;
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -2332,6 +2379,8 @@ static uint8_t __uds_rdtci_report_dtc_extended_data(uds_context_t *ctx,
             }
         }
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -2474,6 +2523,8 @@ static uint8_t __uds_svc_read_dtc_information(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -2609,6 +2660,8 @@ static uint8_t __uds_svc_routine_control(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -2738,6 +2791,8 @@ static uint8_t __uds_svc_request_download(uds_context_t *ctx,
             }
         }
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -2869,6 +2924,8 @@ static uint8_t __uds_svc_request_upload(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -2937,6 +2994,8 @@ static uint8_t __uds_transmit_data_download(uds_context_t *ctx, uint8_t bsqc,
                     (ctx->data_transfer.bsqc - 1) & 0xFF);
         nrc = UDS_NRC_WBSC;
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -3016,6 +3075,8 @@ static uint8_t __uds_transmit_data_upload(uds_context_t *ctx, uint8_t bsqc,
         nrc = UDS_NRC_WBSC;
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -3060,6 +3121,8 @@ static uint8_t __uds_svc_transmit_data(uds_context_t *ctx,
     {
         nrc = UDS_NRC_RSE;
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -3159,6 +3222,8 @@ static uint8_t __uds_svc_request_transfer_exit(uds_context_t *ctx,
     {
         nrc = UDS_NRC_RSE;
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -3264,6 +3329,8 @@ static uint8_t __uds_file_transfer_addfile(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -3319,6 +3386,8 @@ static uint8_t __uds_file_transfer_delfile(uds_context_t *ctx,
             }
         }
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -3424,6 +3493,8 @@ static uint8_t __uds_file_transfer_replfile(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -3513,6 +3584,8 @@ static uint8_t __uds_file_transfer_rdfile(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -3592,6 +3665,8 @@ static uint8_t __uds_file_transfer_rddir(uds_context_t *ctx,
         }
     }
 
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
+
     return nrc;
 }
 
@@ -3639,6 +3714,8 @@ static uint8_t __uds_svc_request_file_transfer(uds_context_t *ctx,
             break;
         }
     }
+
+    uds_trace(ctx, "%s() -> 0x%02X\n", __func__, nrc);
 
     return nrc;
 }
@@ -3822,6 +3899,8 @@ static int __uds_process_service(uds_context_t *ctx,
         uds_debug(ctx, "suppress positive response for service 0x%02X\n", service);
     }
 
+    uds_trace(ctx, "%s() -> nrc=0x%02X, ret=%d\n", __func__, nrc, ret);
+
     return ret;
 }
 
@@ -3851,6 +3930,8 @@ static int __uds_init(uds_context_t *ctx, const uds_config_t *config,
     (void)memset(ctx->response_buffer, 0, ctx->response_buffer_len);
 
     __uds_reset_to_default_session(ctx);
+
+    uds_trace(ctx, "%s() -> ret=%d\n", __func__, ret);
 
     return ret;
 }
@@ -3976,7 +4057,7 @@ int uds_cycle(uds_context_t *ctx, const struct timespec *timestamp)
                 __uds_reset_secure_access(ctx);
             }
 
-            if (__uds_data_transfer_active(ctx) == 0)
+            if (ctx->data_transfer.direction != UDS_DATA_TRANSFER_NONE)
             {
                 if ((UDS_DATA_TRANSFER_DOWNLOAD == ctx->data_transfer.direction) &&
                     (__uds_session_and_security_check(ctx, &ctx->data_transfer.mem_region->sec_download) != 0))

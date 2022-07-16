@@ -340,9 +340,10 @@ typedef enum __uds_loglevel
     UDS_LOGLVL_NOTICE  = 5,
     UDS_LOGLVL_INFO    = 6,
     UDS_LOGLVL_DEBUG   = 7,
+    UDS_LOGLVL_TRACE   = 8,
 
     UDS_LOGLVL_MIN   = UDS_LOGLVL_EMERG,
-    UDS_LOGLVL_MAX   = UDS_LOGLVL_DEBUG,
+    UDS_LOGLVL_MAX   = UDS_LOGLVL_TRACE,
 } uds_loglevel_e;
 
 #endif // UDS_TYPES_H__
