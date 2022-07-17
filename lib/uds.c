@@ -9,7 +9,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "uds/uds.h"
 #include "uds/uds_config.h"
@@ -384,7 +383,7 @@ static int i_uds_send(uds_context_t *ctx, const uint8_t *data, size_t len)
     return ret;
 }
 
-static uint8_t i_uds_svc_session_control(uds_context_t *ctx, const struct timespec *timestamp,
+static uint8_t i_uds_svc_session_control(uds_context_t *ctx, const uds_time_t *timestamp,
                                          const uint8_t *data, size_t data_len, uint8_t *res_data,
                                          size_t *res_data_len)
 {
@@ -444,7 +443,7 @@ static uint8_t i_uds_svc_session_control(uds_context_t *ctx, const struct timesp
     return nrc;
 }
 
-static uint8_t i_uds_svc_ecu_reset(uds_context_t *ctx, const struct timespec *timestamp,
+static uint8_t i_uds_svc_ecu_reset(uds_context_t *ctx, const uds_time_t *timestamp,
                                    const uint8_t *data, size_t data_len, uint8_t *res_data,
                                    size_t *res_data_len)
 {
@@ -649,15 +648,16 @@ static inline void i_uds_security_access_reset_failed_attempts(uds_context_t *ct
 }
 
 static inline void i_uds_security_access_start_delay_timer(uds_context_t *ctx,
-                                                           const struct timespec *now)
+                                                           const uds_time_t *now)
 {
     if (now != NULL)
     {
-        (void)memcpy(&ctx->sa_delay_timer_timestamp, now, sizeof(ctx->sa_delay_timer_timestamp));
+        ctx->sa_delay_timer_timestamp.seconds = now->seconds;
+        ctx->sa_delay_timer_timestamp.microseconds = now->microseconds;
     }
 }
 
-static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const struct timespec *timestamp,
+static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const uds_time_t *timestamp,
                                          const uint8_t *data, size_t data_len, uint8_t *res_data,
                                          size_t *res_data_len)
 {
@@ -804,7 +804,7 @@ static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const struct timesp
     return nrc;
 }
 
-static uint8_t i_uds_svc_communication_control(uds_context_t *ctx, const struct timespec *timestamp,
+static uint8_t i_uds_svc_communication_control(uds_context_t *ctx, const uds_time_t *timestamp,
                                                const uint8_t *data, size_t data_len,
                                                uint8_t *res_data, size_t *res_data_len)
 {
@@ -927,7 +927,7 @@ static uint8_t i_uds_svc_communication_control(uds_context_t *ctx, const struct 
     return nrc;
 }
 
-static uint8_t i_uds_svc_tester_present(uds_context_t *ctx, const struct timespec *timestamp,
+static uint8_t i_uds_svc_tester_present(uds_context_t *ctx, const uds_time_t *timestamp,
                                         const uint8_t *data, size_t data_len, uint8_t *res_data,
                                         size_t *res_data_len)
 {
@@ -961,7 +961,7 @@ static uint8_t i_uds_svc_tester_present(uds_context_t *ctx, const struct timespe
 }
 
 static uint8_t i_uds_svc_access_timing_parameters(uds_context_t *ctx,
-                                                  const struct timespec *timestamp,
+                                                  const uds_time_t *timestamp,
                                                   const uint8_t *data, size_t data_len,
                                                   uint8_t *res_data, size_t *res_data_len)
 {
@@ -1045,7 +1045,7 @@ static uint8_t i_uds_svc_access_timing_parameters(uds_context_t *ctx,
     return nrc;
 }
 
-static uint8_t i_uds_svc_control_dtc_settings(uds_context_t *ctx, const struct timespec *timestamp,
+static uint8_t i_uds_svc_control_dtc_settings(uds_context_t *ctx, const uds_time_t *timestamp,
                                               const uint8_t *data, size_t data_len,
                                               uint8_t *res_data, size_t *res_data_len)
 {
@@ -1183,7 +1183,7 @@ static uint8_t i_uds_svc_control_dtc_settings(uds_context_t *ctx, const struct t
     return nrc;
 }
 
-static uint8_t i_uds_svc_link_control(uds_context_t *ctx, const struct timespec *timestamp,
+static uint8_t i_uds_svc_link_control(uds_context_t *ctx, const uds_time_t *timestamp,
                                       const uint8_t *data, size_t data_len, uint8_t *res_data,
                                       size_t *res_data_len)
 {
@@ -1322,7 +1322,7 @@ static uint8_t i_uds_svc_link_control(uds_context_t *ctx, const struct timespec 
 }
 
 static uint8_t i_uds_svc_read_data_by_identifier(uds_context_t *ctx,
-                                                 const struct timespec *timestamp,
+                                                 const uds_time_t *timestamp,
                                                  const uint8_t *data, size_t data_len,
                                                  uint8_t *res_data, size_t *res_data_len)
 {
@@ -1439,7 +1439,7 @@ static uint8_t i_uds_svc_read_data_by_identifier(uds_context_t *ctx,
 }
 
 static uint8_t i_uds_svc_read_memory_by_address(uds_context_t *ctx,
-                                                const struct timespec *timestamp,
+                                                const uds_time_t *timestamp,
                                                 const uint8_t *data, size_t data_len,
                                                 uint8_t *res_data, size_t *res_data_len)
 {
@@ -1550,7 +1550,7 @@ static uint8_t i_uds_svc_read_memory_by_address(uds_context_t *ctx,
 }
 
 static uint8_t i_uds_svc_read_scaling_data_by_identifier(uds_context_t *ctx,
-                                                         const struct timespec *timestamp,
+                                                         const uds_time_t *timestamp,
                                                          const uint8_t *data, size_t data_len,
                                                          uint8_t *res_data, size_t *res_data_len)
 {
@@ -1614,7 +1614,7 @@ static uint8_t i_uds_svc_read_scaling_data_by_identifier(uds_context_t *ctx,
 }
 
 static uint8_t i_uds_svc_write_data_by_identifier(uds_context_t *ctx,
-                                                  const struct timespec *timestamp,
+                                                  const uds_time_t *timestamp,
                                                   const uint8_t *data, size_t data_len,
                                                   uint8_t *res_data, size_t *res_data_len)
 {
@@ -1682,7 +1682,7 @@ static uint8_t i_uds_svc_write_data_by_identifier(uds_context_t *ctx,
 }
 
 static uint8_t i_uds_svc_write_memory_by_address(uds_context_t *ctx,
-                                                 const struct timespec *timestamp,
+                                                 const uds_time_t *timestamp,
                                                  const uint8_t *data, size_t data_len,
                                                  uint8_t *res_data, size_t *res_data_len)
 {
@@ -1801,7 +1801,7 @@ static uint8_t i_uds_svc_write_memory_by_address(uds_context_t *ctx,
 }
 
 static uint8_t i_uds_svc_io_control_by_identifier(uds_context_t *ctx,
-                                                  const struct timespec *timestamp,
+                                                  const uds_time_t *timestamp,
                                                   const uint8_t *data, size_t data_len,
                                                   uint8_t *res_data, size_t *res_data_len)
 {
@@ -1906,7 +1906,7 @@ static uint8_t i_uds_svc_io_control_by_identifier(uds_context_t *ctx,
 }
 
 static uint8_t i_uds_svc_clear_diagnostic_information(uds_context_t *ctx,
-                                                      const struct timespec *timestamp,
+                                                      const uds_time_t *timestamp,
                                                       const uint8_t *data, size_t data_len,
                                                       uint8_t *res_data, size_t *res_data_len)
 {
@@ -2423,7 +2423,7 @@ static uint8_t i_uds_rdtci_report_dtc_extended_data(uds_context_t *ctx, const ui
     return nrc;
 }
 
-static uint8_t i_uds_svc_read_dtc_information(uds_context_t *ctx, const struct timespec *timestamp,
+static uint8_t i_uds_svc_read_dtc_information(uds_context_t *ctx, const uds_time_t *timestamp,
                                               const uint8_t *data, size_t data_len,
                                               uint8_t *res_data, size_t *res_data_len)
 {
@@ -2565,7 +2565,7 @@ static uint8_t i_uds_svc_read_dtc_information(uds_context_t *ctx, const struct t
     return nrc;
 }
 
-static uint8_t i_uds_svc_routine_control(uds_context_t *ctx, const struct timespec *timestamp,
+static uint8_t i_uds_svc_routine_control(uds_context_t *ctx, const uds_time_t *timestamp,
                                          const uint8_t *data, size_t data_len, uint8_t *res_data,
                                          size_t *res_data_len)
 {
@@ -2700,7 +2700,7 @@ static uint8_t i_uds_svc_routine_control(uds_context_t *ctx, const struct timesp
     return nrc;
 }
 
-static uint8_t i_uds_svc_request_download(uds_context_t *ctx, const struct timespec *timestamp,
+static uint8_t i_uds_svc_request_download(uds_context_t *ctx, const uds_time_t *timestamp,
                                           const uint8_t *data, size_t data_len, uint8_t *res_data,
                                           size_t *res_data_len)
 {
@@ -2834,7 +2834,7 @@ static uint8_t i_uds_svc_request_download(uds_context_t *ctx, const struct times
     return nrc;
 }
 
-static uint8_t i_uds_svc_request_upload(uds_context_t *ctx, const struct timespec *timestamp,
+static uint8_t i_uds_svc_request_upload(uds_context_t *ctx, const uds_time_t *timestamp,
                                         const uint8_t *data, size_t data_len, uint8_t *res_data,
                                         size_t *res_data_len)
 {
@@ -3119,7 +3119,7 @@ static uint8_t i_uds_transmit_data_upload(uds_context_t *ctx, uint8_t bsqc, uint
     return nrc;
 }
 
-static uint8_t i_uds_svc_transmit_data(uds_context_t *ctx, const struct timespec *timestamp,
+static uint8_t i_uds_svc_transmit_data(uds_context_t *ctx, const uds_time_t *timestamp,
                                        const uint8_t *data, size_t data_len, uint8_t *res_data,
                                        size_t *res_data_len)
 {
@@ -3167,7 +3167,7 @@ static uint8_t i_uds_svc_transmit_data(uds_context_t *ctx, const struct timespec
     return nrc;
 }
 
-static uint8_t i_uds_svc_request_transfer_exit(uds_context_t *ctx, const struct timespec *timestamp,
+static uint8_t i_uds_svc_request_transfer_exit(uds_context_t *ctx, const uds_time_t *timestamp,
                                                const uint8_t *data, size_t data_len,
                                                uint8_t *res_data, size_t *res_data_len)
 {
@@ -3662,7 +3662,7 @@ static uint8_t i_uds_file_transfer_rddir(uds_context_t *ctx, const uint8_t *data
     return nrc;
 }
 
-static uint8_t i_uds_svc_request_file_transfer(uds_context_t *ctx, const struct timespec *timestamp,
+static uint8_t i_uds_svc_request_file_transfer(uds_context_t *ctx, const uds_time_t *timestamp,
                                                const uint8_t *data, size_t data_len,
                                                uint8_t *res_data, size_t *res_data_len)
 {
@@ -3706,7 +3706,7 @@ static uint8_t i_uds_svc_request_file_transfer(uds_context_t *ctx, const struct 
     return nrc;
 }
 
-static int i_uds_process_service(uds_context_t *ctx, const struct timespec *timestamp,
+static int i_uds_process_service(uds_context_t *ctx, const uds_time_t *timestamp,
                                  const uint8_t service, const uint8_t *data, size_t data_len,
                                  const uds_address_e addr_type)
 {
@@ -3879,7 +3879,7 @@ static int i_uds_process_service(uds_context_t *ctx, const struct timespec *time
 }
 
 static int i_uds_init(uds_context_t *ctx, const uds_config_t *config, uint8_t *response_buffer,
-                      size_t response_buffer_len, void *priv, const struct timespec *timestamp)
+                      size_t response_buffer_len, void *priv, const uds_time_t *timestamp)
 {
     int ret = 0;
 
@@ -3896,11 +3896,14 @@ static int i_uds_init(uds_context_t *ctx, const uds_config_t *config, uint8_t *r
 
     if (timestamp != NULL)
     {
-        (void)memcpy(&ctx->sa_delay_timer_timestamp, timestamp,
-                     sizeof(ctx->sa_delay_timer_timestamp));
+        ctx->sa_delay_timer_timestamp.seconds = timestamp->seconds;
+        ctx->sa_delay_timer_timestamp.microseconds = timestamp->microseconds;
     }
-
-    (void)memset(ctx->response_buffer, 0, ctx->response_buffer_len);
+    else
+    {
+        ctx->sa_delay_timer_timestamp.seconds = 0;
+        ctx->sa_delay_timer_timestamp.microseconds = 0U;
+    }
 
     i_uds_reset_to_default_session(ctx);
 
@@ -3909,22 +3912,22 @@ static int i_uds_init(uds_context_t *ctx, const uds_config_t *config, uint8_t *r
     return ret;
 }
 
-static long int timespec_elapsed_ms(const struct timespec *stop, const struct timespec *start)
+static long int i_uds_time_elapsed_ms(const uds_time_t *stop, const uds_time_t *start)
 {
     long int elapsed = 0;
 
-    if ((stop->tv_sec > start->tv_sec) ||
-        ((stop->tv_sec == start->tv_sec) && (stop->tv_nsec >= start->tv_sec)))
+    if ((stop->seconds > start->seconds) ||
+        ((stop->seconds == start->seconds) && (stop->microseconds >= start->microseconds)))
     {
-        elapsed = 1000L * (stop->tv_sec - start->tv_sec);
-        elapsed += (stop->tv_nsec - start->tv_nsec + 500000L) / 1000000L;
+        elapsed = 1000L * (stop->seconds - start->seconds);
+        elapsed += ((((long int)stop->microseconds - (long int)start->microseconds) + 500) / 1000);
     }
 
     return elapsed;
 }
 
 int uds_init(uds_context_t *ctx, const uds_config_t *config, uint8_t *response_buffer,
-             size_t response_buffer_len, void *priv, const struct timespec *timestamp)
+             size_t response_buffer_len, void *priv, const uds_time_t *timestamp)
 {
     int ret = -1;
 
@@ -3949,6 +3952,10 @@ int uds_init(uds_context_t *ctx, const uds_config_t *config, uint8_t *response_b
     }
     else
     {
+        if (timestamp == NULL)
+        {
+            uds_warning(ctx, "initial timestamp not supplied\n");
+        }
         ret = i_uds_init(ctx, config, response_buffer, response_buffer_len, priv, timestamp);
     }
 
@@ -3964,7 +3971,7 @@ void uds_set_loglevel(uds_context_t *ctx, uds_loglevel_e level)
 }
 
 int uds_receive(uds_context_t *ctx, uds_address_e addr_type, const uint8_t *data, const size_t len,
-                const struct timespec *timestamp)
+                const uds_time_t *timestamp)
 {
     int ret = 0;
 
@@ -4006,11 +4013,11 @@ int uds_receive(uds_context_t *ctx, uds_address_e addr_type, const uint8_t *data
     return ret;
 }
 
-int uds_cycle(uds_context_t *ctx, const struct timespec *timestamp)
+int uds_cycle(uds_context_t *ctx, const uds_time_t *timestamp)
 {
     long int elapsed_ms = 0;
 
-    elapsed_ms = timespec_elapsed_ms(timestamp, &ctx->last_message_timestamp);
+    elapsed_ms = i_uds_time_elapsed_ms(timestamp, &ctx->last_message_timestamp);
     if ((elapsed_ms > 0) && (ctx->current_session != NULL) && (ctx->current_session->s3_time > 0U))
     {
         if ((unsigned long)elapsed_ms > ctx->current_session->s3_time)
@@ -4054,7 +4061,7 @@ int uds_cycle(uds_context_t *ctx, const struct timespec *timestamp)
 
     if (i_uds_security_access_max_attempts_exceeded(ctx) != 0)
     {
-        elapsed_ms = timespec_elapsed_ms(timestamp, &ctx->sa_delay_timer_timestamp);
+        elapsed_ms = i_uds_time_elapsed_ms(timestamp, &ctx->sa_delay_timer_timestamp);
         if ((elapsed_ms > 0) && ((unsigned long)elapsed_ms >= ctx->config->sa_delay_timer_ms))
         {
             uds_info(ctx, "SA delay timer expired, reset attempts number\n");

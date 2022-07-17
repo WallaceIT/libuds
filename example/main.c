@@ -664,6 +664,21 @@ static const uds_config_t uds_config = {
     },
 };
 
+static int gettime_uds(uds_time_t *now)
+{
+    struct timespec now_ts;
+    int ret;
+
+    ret = clock_gettime(CLOCK_MONOTONIC, &now_ts);
+    if (ret == 0)
+    {
+        now->seconds = now_ts.tv_sec;
+        now->microseconds = ((now_ts.tv_nsec + 500UL) / 1000UL);
+    }
+
+    return ret;
+}
+
 int main(int argc, char *argv[])
 {
     const char *can_iface = "vcan0";
@@ -687,7 +702,7 @@ int main(int argc, char *argv[])
     unsigned char can_tp_phys_buf[5000];
     unsigned char can_tp_func_buf[5000];
 
-    struct timespec now;
+    uds_time_t now;
 
     bool run = true;
     int i = 0;
@@ -720,9 +735,9 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+    if (gettime_uds(&now) != 0)
     {
-        fprintf(stderr, "clock_gettime failed: %s\n", strerror(errno));
+        fprintf(stderr, "gettime failed: %s\n", strerror(errno));
         return -1;
     }
 
@@ -827,9 +842,9 @@ int main(int argc, char *argv[])
         {
             fprintf(stderr, "epoll_wait interrupted by signal\n");
         }
-        else if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        else if (gettime_uds(&now) != 0)
         {
-            fprintf(stderr, "clock_gettime failed: %s\n", strerror(errno));
+            fprintf(stderr, "gettime failed: %s\n", strerror(errno));
         }
 
         // Process events

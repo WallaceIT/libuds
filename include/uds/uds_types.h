@@ -319,6 +319,12 @@ typedef struct
     unsigned long num_routines;
 } uds_config_t;
 
+typedef struct
+{
+    int64_t seconds;
+    unsigned int microseconds;
+} uds_time_t;
+
 typedef enum
 {
     UDS_ADDRESS_PHYSICAL,
