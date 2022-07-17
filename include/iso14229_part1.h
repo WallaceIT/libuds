@@ -97,8 +97,10 @@
 #define UDS_LEV_RT_SSS_MAX      0x7EU
 
 // Security access types (sub-functions of UDS_SVC_SA)
-#define UDS_LEV_SA_RSD          0x01U // Request Seed
-#define UDS_LEV_SA_SK           0x02U // Send Key
+#define UDS_LEV_SAT_RSD         0x01U // Request Seed
+#define UDS_LEV_SAT_SK          0x02U // Send Key
+#define UDS_LEV_SAT_SSS_MIN     0x61U // System Supplier Specific
+#define UDS_LEV_SAT_SSS_MAX     0x7EU
 
 // Control types (sub-functions of UDS_SVC_CC)
 #define UDS_LEV_CTRLTP_ERXTX        0x00U // Enable Rx and Tx

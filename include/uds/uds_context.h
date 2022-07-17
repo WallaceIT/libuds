@@ -5,10 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <uds/uds_types.h>
 #include <uds/uds_config.h>
+#include <uds/uds_types.h>
 
-typedef enum __uds_data_transfer_dir
+typedef enum
 {
     UDS_DATA_TRANSFER_NONE,
     UDS_DATA_TRANSFER_DOWNLOAD,
@@ -18,7 +18,7 @@ typedef enum __uds_data_transfer_dir
     UDS_DATA_TRANSFER_LIST_DIR,
 } uds_data_transfer_dir_e;
 
-typedef struct __uds_context
+typedef struct
 {
     const uds_config_t *config;
     void *priv;

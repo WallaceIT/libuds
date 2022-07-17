@@ -29,13 +29,13 @@
 #define UDS_SCALING_SEV             __UDS_SCALING_BYTE(0x5,1)
 
 /* ASCII */
-#define UDS_SCALING_ASCII(n)        __UDS_SCALING_BYTE(0x6,n)
+#define UDS_SCALING_ASCII(n)        __UDS_SCALING_BYTE(0x6,(n))
 
 /* signedFloatingPoint ANSI/IEEE Std 754-1985 */
 #define UDS_SCALING_SFP             __UDS_SCALING_BYTE(0x7,2)
 
 /* Packets */
-#define UDS_SCALING_PACKETS(n)      __UDS_SCALING_BYTE(0x8,n)
+#define UDS_SCALING_PACKETS(n)      __UDS_SCALING_BYTE(0x8,(n))
 
 /* formula */
 #define UDS_SCALING_FORMULA(n)      __UDS_SCALING_BYTE(0x9,(n+1))
