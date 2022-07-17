@@ -1,3 +1,8 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/*
+ * This file is part of libuds.
+ * Copyright (C) 2022 Francesco Valla <valla.francesco@gmail.com>
+ */
 
 #ifndef UDS_H__
 #define UDS_H__
