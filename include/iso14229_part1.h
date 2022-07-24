@@ -1,7 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/*
- * This file is part of libuds.
- * Copyright (C) 2022 Francesco Valla <valla.francesco@gmail.com>
+/**
+ * \file iso14229_part1.h
+ *
+ * Values from ISO14229-1.
+ *
+ * This header contains values defined by the ISO14229-1 document.
+ *
+ * \author Francesco Valla <valla.francesco@gmail.com>
+ * \copyright (c) 2022 Francesco Valla - License: GPL-3.0-only
  */
 
 #ifndef ISO14229_PART1_H__

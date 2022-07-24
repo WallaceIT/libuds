@@ -1,7 +1,14 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/*
- * This file is part of libuds.
- * Copyright (C) 2022 Francesco Valla <valla.francesco@gmail.com>
+/**
+ * \file uds_context.h
+ *
+ * Type definition for libuds context.
+ *
+ * This header contains the definition of the context data used by libuds.
+ * All types and definitions present in this file shall be treated as opaque.
+ *
+ * \author Francesco Valla <valla.francesco@gmail.com>
+ * \copyright (c) 2022 Francesco Valla - License: GPL-3.0-only
  */
 
 #ifndef UDS_CONTEXT_H__

@@ -1,7 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/*
- * This file is part of libuds.
- * Copyright (C) 2022 Francesco Valla <valla.francesco@gmail.com>
+/**
+ * \file uds_scaling.h
+ *
+ * Scaling helpers.
+ *
+ * This header defines helpers that can be used when defining scaling for DDIs.
+ *
+ * \author Francesco Valla <valla.francesco@gmail.com>
+ * \copyright (c) 2022 Francesco Valla - License: GPL-3.0-only
  */
 
 #ifndef UDS_SCALING_H__

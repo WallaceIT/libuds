@@ -1,7 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/*
- * This file is part of libuds.
- * Copyright (C) 2022 Francesco Valla <valla.francesco@gmail.com>
+/**
+ * \file uds_types.h
+ *
+ * Custom types defined and used by libuds.
+ *
+ * This header defines several custom types and enumerations used by libuds.
+ *
+ * \author Francesco Valla <valla.francesco@gmail.com>
+ * \copyright (c) 2022 Francesco Valla - License: GPL-3.0-only
  */
 
 #ifndef UDS_TYPES_H__
