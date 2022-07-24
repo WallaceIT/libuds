@@ -184,7 +184,7 @@ static void i_uds_reset_to_default_session(uds_context_t *ctx)
     // If default session has not been found, use a generic one
     if (s == ctx->config->num_session_config)
     {
-        const uds_session_cfg_t default_session = {
+        static const uds_session_cfg_t default_session = {
             .session_type = UDS_LEV_DS_DS,
             .sa_type_mask = 0UL,
         };
@@ -194,7 +194,7 @@ static void i_uds_reset_to_default_session(uds_context_t *ctx)
 
 static inline void i_uds_activate_sa(uds_context_t *ctx, const uds_sa_cfg_t *sa)
 {
-    uds_trace(ctx, "%s(0x%02X)\n", __func__, sa->sa_index);
+    uds_trace(ctx, "%s()\n", __func__);
 
     ctx->current_sa = sa;
     if (ctx->config->cb_notify_sa_change != NULL)
