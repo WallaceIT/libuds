@@ -630,7 +630,44 @@ static int file_transfer_delete(void *priv, const char *filepath, size_t filepat
     return unlink(buf_path);
 }
 
+static uds_loglevel_e current_loglevel = UDS_LOGLVL_WARNING;
+
+static void log_function(void *priv, uds_loglevel_e level, const char *message, const char *arg_name,
+                     unsigned long long arg)
+{
+    (void)priv;
+
+    if (level >= current_loglevel)
+    {
+        static const char * loglevel_names[UDS_LOGLVL_TRACE + 1] = {
+            [UDS_LOGLVL_ERR]        = "ERROR",
+            [UDS_LOGLVL_WARNING]    = "WARNG",
+            [UDS_LOGLVL_INFO]       = "INFO ",
+            [UDS_LOGLVL_DEBUG]      = "DEBUG",
+            [UDS_LOGLVL_TRACE]      = "TRACE",
+        };
+
+        const char * loglevel_name  = "UNKNW";
+
+        if (level <= UDS_LOGLVL_TRACE)
+        {
+            loglevel_name = loglevel_names[level];
+        }
+
+        if (arg_name != NULL)
+        {
+            printf("uds[%s]: %s (%s = 0x%llX)\n", loglevel_name, message, arg_name, arg);
+        }
+        else
+        {
+            printf("uds[%s]: %s\n", loglevel_name, message);
+        }
+    }
+}
+
 static const uds_config_t uds_config = {
+    .log_func = log_function,
+
     .session_config = uds_sessions,
     .num_session_config = sizeof(uds_sessions) / sizeof(uds_session_cfg_t),
 
@@ -685,7 +722,6 @@ int main(int argc, char *argv[])
 
     uds_context_t uds_ctx;
     uint8_t uds_buffer[4095];
-    uds_loglevel_e uds_loglevel = UDS_LOGLVL_WARNING;
 
     int fd_timer_uds = -1;
     int fd_signals = -1;
@@ -722,10 +758,10 @@ int main(int argc, char *argv[])
             return 0;
 
         case 'l':
-            uds_loglevel = strtoul(optarg, NULL, 10);
-            if (uds_loglevel > UDS_LOGLVL_MAX)
+            current_loglevel = strtoul(optarg, NULL, 10);
+            if (current_loglevel > UDS_LOGLVL_TRACE)
             {
-                uds_loglevel = UDS_LOGLVL_MAX;
+                current_loglevel = UDS_LOGLVL_TRACE;
             }
             break;
 
@@ -748,8 +784,6 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Failed to initialize UDS library\n");
         return -1;
     }
-
-    uds_set_loglevel(&uds_ctx, uds_loglevel);
 
     // Create poller
     epollfd = epoll_create1(0);

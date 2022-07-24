@@ -30,7 +30,6 @@ typedef struct
 
     uds_time_t last_message_timestamp;
 
-    uds_loglevel_e loglevel;
     const uds_session_cfg_t *current_session;
     uint8_t current_sa_seed;
     const uds_sa_cfg_t *current_sa;

@@ -61,6 +61,15 @@ typedef enum
     UDS_FILE_MODE_LIST_DIR = 3,
 } uds_file_mode_e;
 
+typedef enum
+{
+    UDS_LOGLVL_ERR = 0,
+    UDS_LOGLVL_WARNING = 1,
+    UDS_LOGLVL_INFO = 2,
+    UDS_LOGLVL_DEBUG = 3,
+    UDS_LOGLVL_TRACE = 4,
+} uds_loglevel_e;
+
 typedef struct
 {
     uint64_t standard_session_mask;
@@ -285,6 +294,8 @@ typedef struct
     int (*cb_send)(void *priv, const uint8_t data[], size_t len);
     void (*cb_notify_session_change)(void *priv, const uint8_t session_type);
     void (*cb_notify_sa_change)(void *priv, const uint8_t sa_index);
+    void (*log_func)(void *priv, uds_loglevel_e level, const char *message, const char *arg_name,
+                     unsigned long long arg);
 
     const uds_session_cfg_t *session_config;
     unsigned long num_session_config;
@@ -330,21 +341,5 @@ typedef enum
     UDS_ADDRESS_PHYSICAL,
     UDS_ADDRESS_FUNCTIONAL,
 } uds_address_e;
-
-typedef enum
-{
-    UDS_LOGLVL_EMERG = 0,
-    UDS_LOGLVL_ALERT = 1,
-    UDS_LOGLVL_CRIT = 2,
-    UDS_LOGLVL_ERR = 3,
-    UDS_LOGLVL_WARNING = 4,
-    UDS_LOGLVL_NOTICE = 5,
-    UDS_LOGLVL_INFO = 6,
-    UDS_LOGLVL_DEBUG = 7,
-    UDS_LOGLVL_TRACE = 8,
-
-    UDS_LOGLVL_MIN = UDS_LOGLVL_EMERG,
-    UDS_LOGLVL_MAX = UDS_LOGLVL_TRACE,
-} uds_loglevel_e;
 
 #endif // UDS_TYPES_H__
