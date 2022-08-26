@@ -55,3 +55,8 @@ _deps
 # IDEs
 .vscode
 
+# QA tools
+/prqa
+prqaproject.xml*
+*.dax
+

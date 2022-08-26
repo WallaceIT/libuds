@@ -120,6 +120,10 @@
 #define UDS_LEV_CTRLTP_DRXTX        0x03U // Disable RX and TX
 #define UDS_LEV_CTRLTP_ERXDTXWEAI   0x04U // Enable Rx And Disable TX With Enhanced Address Information
 #define UDS_LEV_CTRLTP_ERXTXWEAI    0x05U // Enable Rx And TX With Enhanced Address Information
+#define UDS_LEV_CTRLTP_VMS_MIN      0x40U // Vehicle Manufacturer Specific
+#define UDS_LEV_CTRLTP_VMS_MAX      0x5FU
+#define UDS_LEV_CTRLTP_SSS_MIN      0x60U // System Supplier Specific
+#define UDS_LEV_CTRLTP_SSS_MAX      0x7EU
 
 // Communication type (parameter of UDS_SVC_CC)
 #define UDS_CTP_NCM             0x01U // Normal Communication Messages

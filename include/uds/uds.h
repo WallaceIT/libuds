@@ -30,10 +30,10 @@
  * library.
  * \param timestamp Initialization timestamp.
  *
- * \return 0 on success, -1 on error or if ctx or config are NULL
+ * \return UDS_NO_ERROR on success, other value on error or if ctx or config are NULL
  */
-int uds_init(uds_context_t *ctx, const uds_config_t *config, uint8_t *response_buffer,
-             size_t response_buffer_len, void *priv, const uds_time_t *timestamp);
+uds_err_e uds_init(uds_context_t *ctx, const uds_config_t *config, uint8_t *response_buffer,
+                   size_t response_buffer_len, void *priv, const uds_time_t *timestamp);
 
 /**
  * \brief Feed data received from transport layer to the UDS stack.
@@ -44,10 +44,10 @@ int uds_init(uds_context_t *ctx, const uds_config_t *config, uint8_t *response_b
  * \param len Length of received data.
  * \param timestamp Reception timestamp.
  *
- * \return 0 on success, -1 on error
+ * \return UDS_NO_ERROR on success, other value on error
  */
-int uds_receive(uds_context_t *ctx, const uds_address_e addr_type, const uint8_t *data,
-                const size_t len, const uds_time_t *timestamp);
+uds_err_e uds_receive(uds_context_t *ctx, const uds_address_e addr_type, const uint8_t *data,
+                      const size_t len, const uds_time_t *timestamp);
 
 /**
  * \brief Stack periodic cycle function.
@@ -58,9 +58,9 @@ int uds_receive(uds_context_t *ctx, const uds_address_e addr_type, const uint8_t
  * \param ctx UDS context.
  * \param timestamp Cycle timestamp.
  *
- * \return 0 on success, -1 on error
+ * \return UDS_NO_ERROR on success, other value on error
  */
-int uds_cycle(uds_context_t *ctx, const uds_time_t *timestamp);
+uds_err_e uds_cycle(uds_context_t *ctx, const uds_time_t *timestamp);
 
 /**
  * \brief Reset secure access delay timer.

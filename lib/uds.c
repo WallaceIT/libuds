@@ -8,6 +8,7 @@
  * \copyright (c) 2022 Francesco Valla - License: GPL-3.0-only
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -20,76 +21,101 @@
 #include "iso14229_part1.h"
 
 // Macros
-#define UDS_UNUSED(x)                 ((void)(x))
-
-#define UDS_GET_SUBFUNCTION(x)        ((x) & (~UDS_SPRMINB))
-#define UDS_SUPPRESS_PR(x)            (UDS_SPRMINB == ((x)&UDS_SPRMINB))
-
-#define UDS_HIGH_NIBBLE(b)            (((b) >> 4) & 0x0FU)
-#define UDS_LOW_NIBBLE(b)             (((b) >> 0) & 0x0FU)
-#define UDS_FROM_NIBBLES(low, high)   ((((high)&0x0FU) << 4) | ((low) % 0x0FU))
+#define UDS_UNUSED                    (void)
 
 #define UDS_INVALID_SA_INDEX          0xFFU
 
 #define UDS_FILEPATH_MAX              4096U
 
-#define UDS_LOAD_UINT16_BIG_ENDIAN(d) (((0xFFULL & (d)[0]) << 8U) | (d)[1])
 
-// Logging
-#define uds_err(ctx, msg, argn, arg)     uds_log(ctx, UDS_LOGLVL_ERR, msg, argn, arg)
-#define uds_warning(ctx, msg, argn, arg) uds_log(ctx, UDS_LOGLVL_WARNING, msg, argn, arg)
-#define uds_info(ctx, msg, argn, arg)    uds_log(ctx, UDS_LOGLVL_INFO, msg, argn, arg)
-#define uds_debug(ctx, msg, argn, arg)   uds_log(ctx, UDS_LOGLVL_DEBUG, msg, argn, arg)
-
-#ifdef UDS_CONFIG_ENABLE_TRACING
-#define uds_trace(ctx, msg, argn, arg) uds_log(ctx, UDS_LOGLVL_TRACE, msg, argn, arg)
-#else
-#define uds_trace(ctx, msg, argn, arg)
-#endif
-
-static inline void uds_log(uds_context_t *ctx, uds_loglevel_e level, const char *message,
-                           const char *arg_name, unsigned long long arg)
+static void uds_log(const uds_context_t *ctx, uds_loglevel_e level, const char *message,
+                    const char *arg_name, uint64_t arg)
 {
-    if (ctx->config->log_func != NULL)
+    if ((ctx->config != NULL) && (ctx->config->log_func != NULL))
     {
         ctx->config->log_func(ctx->priv, level, message, arg_name, arg);
     }
 }
 
-static inline void i_uds_store_big_endian(uint8_t *dest, unsigned long long value, size_t num_bytes)
+static inline void uds_err(const uds_context_t *ctx, const char *message,
+                           const char *arg_name, uint64_t arg)
 {
-    unsigned long p;
+    uds_log(ctx, UDS_LOGLVL_ERR, message, arg_name, arg);
+}
+
+static inline void uds_warning(const uds_context_t *ctx, const char *message,
+                               const char *arg_name, uint64_t arg)
+{
+    uds_log(ctx, UDS_LOGLVL_WARNING, message, arg_name, arg);
+}
+
+static inline void uds_info(const uds_context_t *ctx, const char *message,
+                            const char *arg_name, uint64_t arg)
+{
+    uds_log(ctx, UDS_LOGLVL_INFO, message, arg_name, arg);
+}
+
+static inline void uds_debug(const uds_context_t *ctx, const char *message,
+                             const char *arg_name, uint64_t arg)
+{
+    uds_log(ctx, UDS_LOGLVL_DEBUG, message, arg_name, arg);
+}
+
+#ifdef UDS_CONFIG_ENABLE_TRACING
+static inline void uds_trace(const uds_context_t *ctx, const char *message,
+                             const char *arg_name, uint64_t arg)
+{
+    uds_log(ctx, UDS_LOGLVL_TRACE, message, arg_name, arg);
+}
+#else
+#define uds_trace(...)
+#endif
+
+static inline void i_uds_store_big_endian(uint8_t *dest, uint64_t value, size_t num_bytes)
+{
+    size_t p;
     for (p = 0; p < num_bytes; p++)
     {
-        dest[p] = (value >> (8U * (num_bytes - p - 1U))) & 0xFFU;
+        dest[p] = (uint8_t)((value >> (8U * (num_bytes - p - 1U))) & 0xFFU);
     }
 }
 
-static inline unsigned long long i_uds_load_big_endian(const uint8_t *src, size_t num_bytes)
+static inline uint16_t i_uds_load_uint16_big_endian(const uint8_t *src)
 {
-    unsigned long long val = 0U;
-    unsigned long p;
+    return (((uint16_t)src[0] << 8U) | (uint16_t)src[1]);
+}
+
+static inline void i_uds_store_uint16_big_endian(uint8_t *dest, uint16_t value)
+{
+    dest[0] = (uint8_t)((value >> 8U) & 0xFFU);
+    dest[1] = (uint8_t)(value & 0xFFU);
+}
+
+static inline uint32_t i_uds_load_uint32_big_endian(const uint8_t *src, size_t num_bytes)
+{
+    uint32_t val = 0U;
+    size_t p;
     for (p = 0U; p < num_bytes; p++)
     {
-        val |= (0xFFULL & src[p]) << (8U * (num_bytes - p - 1U));
+        val |= (uint32_t)src[p] << (8U * (3U - p));
     }
     return val;
 }
 
-static inline int i_uds_load_big_endian_addr(const uint8_t *src, size_t num_bytes, uintptr_t *addr)
+static uds_err_e i_uds_load_big_endian_addr(const uint8_t *src, size_t num_bytes, uintptr_t *addr)
 {
     uintptr_t val = 0U;
-    int ret = 0;
-    unsigned long p;
+    uds_err_e ret = UDS_NO_ERROR;
+    size_t p;
     for (p = 0U; p < num_bytes; p++)
     {
         if (p <= sizeof(uintptr_t))
         {
-            val |= (0xFFULL & src[p]) << (8U * (num_bytes - p - 1U));
+            val |= ((uintptr_t)src[p]) << (8U * (num_bytes - p - 1U));
         }
         else if (src[p] != 0U)
         {
-            ret = -1;
+            ret = UDS_ERR_GENERIC;
             break;
         }
         else
@@ -98,7 +124,7 @@ static inline int i_uds_load_big_endian_addr(const uint8_t *src, size_t num_byte
         }
     }
 
-    if (ret == 0)
+    if (ret == UDS_NO_ERROR)
     {
         *addr = val;
     }
@@ -106,29 +132,30 @@ static inline int i_uds_load_big_endian_addr(const uint8_t *src, size_t num_byte
     return ret;
 }
 
-static inline int i_uds_load_big_endian_size(const uint8_t *src, size_t num_bytes, size_t *size)
+static uds_err_e i_uds_load_big_endian_size(const uint8_t *src, size_t num_bytes, size_t *size)
 {
     size_t val = 0U;
-    int ret = 0;
-    unsigned long p;
+    uds_err_e ret = UDS_ERR_GENERIC;
+    size_t p;
+
     for (p = 0U; p < num_bytes; p++)
     {
         if (p <= sizeof(size_t))
         {
-            val |= (0xFFULL & src[p]) << (8U * (num_bytes - p - 1U));
+            val |= ((size_t)src[p]) << (8U * (num_bytes - p - 1U));
         }
         else if (src[p] != 0U)
         {
-            ret = -1;
+            ret = UDS_ERR_GENERIC;
             break;
         }
         else
         {
-            // Nothing to do
+            ret = UDS_NO_ERROR;
         }
     }
 
-    if (ret == 0)
+    if (ret == UDS_NO_ERROR)
     {
         *size = val;
     }
@@ -136,12 +163,22 @@ static inline int i_uds_load_big_endian_size(const uint8_t *src, size_t num_byte
     return ret;
 }
 
+static inline uint8_t i_uds_get_subfunction(uint8_t sid)
+{
+    return (uint8_t)(sid & (~UDS_SPRMINB));
+}
+
+static inline bool i_uds_suppress_pr(uint8_t sid)
+{
+    return ((sid & UDS_SPRMINB) == UDS_SPRMINB);
+}
+
 static inline uint8_t i_uds_sat_to_sa_index(const uint8_t sat)
 {
     uint8_t sa_index;
     if (sat >= 1U)
     {
-        sa_index = ((sat - 1U) >> 1);
+        sa_index = ((sat - 1U) >> 1U);
     }
     else
     {
@@ -163,7 +200,7 @@ static inline void i_uds_switch_to_session(uds_context_t *ctx, const uds_session
 
 static void i_uds_reset_to_default_session(uds_context_t *ctx)
 {
-    unsigned long s;
+    uint8_t s;
 
     uds_trace(ctx, __func__, NULL, 0);
 
@@ -214,20 +251,21 @@ static inline void i_uds_reset_secure_access(uds_context_t *ctx)
     i_uds_activate_sa(ctx, NULL);
 }
 
-static inline int i_uds_sa_vs_session_check(uds_context_t *ctx, const uds_sa_cfg_t *sa_config,
-                                            const uds_session_cfg_t *session_config)
+static inline uds_err_e i_uds_sa_vs_session_check(const uds_context_t *ctx,
+                                                  const uds_sa_cfg_t *sa_config,
+                                                  const uds_session_cfg_t *session_config)
 {
-    int ret = -1;
+    uds_err_e ret;
 
     uds_trace(ctx, __func__, NULL, 0);
 
     if (sa_config == NULL)
     {
-        ret = -1;
+        ret = UDS_ERR_GENERIC;
     }
     else if (session_config == NULL)
     {
-        ret = -1;
+        ret = UDS_ERR_GENERIC;
     }
     else
     {
@@ -235,20 +273,20 @@ static inline int i_uds_sa_vs_session_check(uds_context_t *ctx, const uds_sa_cfg
         uds_debug(ctx, "sa_vs_session_check", "session", session_config->session_type);
         if ((UDS_CFG_SA_TYPE(sa_config->sa_index) & session_config->sa_type_mask) != 0U)
         {
-            ret = 0;
+            ret = UDS_NO_ERROR;
         }
         else
         {
-            ret = -1;
+            ret = UDS_ERR_GENERIC;
         }
     }
 
     return ret;
 }
 
-static int i_uds_session_check(uds_context_t *ctx, const uds_security_cfg_t *cfg)
+static uds_err_e i_uds_session_check(const uds_context_t *ctx, const uds_security_cfg_t *cfg)
 {
-    int ret = -1;
+    uds_err_e ret;
 
     uds_trace(ctx, __func__, "active session", ctx->current_session->session_type);
     uds_debug(ctx, "session check", "active session", ctx->current_session->session_type);
@@ -256,7 +294,7 @@ static int i_uds_session_check(uds_context_t *ctx, const uds_security_cfg_t *cfg
     if (ctx->current_session->session_type >= 128U)
     {
         uds_err(ctx, "invalid current session", "session", ctx->current_session->session_type);
-        ret = -1;
+        ret = UDS_ERR_GENERIC;
     }
     else
     {
@@ -276,31 +314,31 @@ static int i_uds_session_check(uds_context_t *ctx, const uds_security_cfg_t *cfg
 
         if ((current_session_mask & target_session_mask) != 0U)
         {
-            ret = 0;
+            ret = UDS_NO_ERROR;
         }
         else
         {
-            ret = -1;
+            ret = UDS_ERR_GENERIC;
         }
     }
 
     return ret;
 }
 
-static int i_uds_security_check(uds_context_t *ctx, const uds_security_cfg_t *cfg)
+static uds_err_e i_uds_security_check(uds_context_t *ctx, const uds_security_cfg_t *cfg)
 {
-    int ret = -1;
+    uds_err_e ret;
 
     uds_trace(ctx, __func__, "sa_tm", cfg->sa_type_mask);
 
     if (cfg->sa_type_mask == 0U)
     {
-        ret = 0;
+        ret = UDS_NO_ERROR;
     }
     else if (ctx->current_sa == NULL)
     {
         uds_debug(ctx, "security check with null current SA", NULL, 0);
-        ret = -1;
+        ret = UDS_ERR_GENERIC;
     }
     else
     {
@@ -308,25 +346,26 @@ static int i_uds_security_check(uds_context_t *ctx, const uds_security_cfg_t *cf
 
         if ((UDS_CFG_SA_TYPE(ctx->current_sa->sa_index) & cfg->sa_type_mask) != 0U)
         {
-            ret = 0;
+            ret = UDS_NO_ERROR;
         }
         else
         {
-            ret = -1;
+            ret = UDS_ERR_GENERIC;
         }
     }
 
     return ret;
 }
 
-static inline int i_uds_session_and_security_check(uds_context_t *ctx,
-                                                   const uds_security_cfg_t *cfg)
+static inline uds_err_e i_uds_session_and_security_check(uds_context_t *ctx,
+                                                         const uds_security_cfg_t *cfg)
 {
-    int ret = -1;
+    uds_err_e ret;
 
-    if ((i_uds_session_check(ctx, cfg) == 0) && (i_uds_security_check(ctx, cfg) == 0))
+    ret = i_uds_session_check(ctx, cfg);
+    if (ret == UDS_NO_ERROR)
     {
-        ret = 0;
+        ret = i_uds_security_check(ctx, cfg);
     }
 
     return ret;
@@ -345,26 +384,16 @@ static inline void i_uds_data_transfer_reset(uds_context_t *ctx)
     ctx->data_transfer.max_block_len = 0;
 }
 
-static int i_uds_send(uds_context_t *ctx, const uint8_t *data, size_t len)
+static uds_err_e i_uds_send(const uds_context_t *ctx, const uint8_t *data, size_t len)
 {
-    int ret = 0;
+    uds_err_e ret;
 
     uds_trace(ctx, __func__, "len", len);
 
-    if (ctx->config->cb_send == NULL)
-    {
-        static int no_cb_err_once = 0;
-        if (no_cb_err_once == 0)
-        {
-            no_cb_err_once = 1;
-            uds_err(ctx, "send callback not installed!", NULL, 0);
-            ret = -1;
-        }
-    }
-    else if ((data != NULL) && (len > 0U))
+    if ((data != NULL) && (len > 0U))
     {
         ret = ctx->config->cb_send(ctx->priv, data, len);
-        if (ret != 0)
+        if (ret != UDS_NO_ERROR)
         {
             uds_err(ctx, "send callback failed", NULL, 0);
         }
@@ -372,7 +401,7 @@ static int i_uds_send(uds_context_t *ctx, const uint8_t *data, size_t len)
     else
     {
         uds_err(ctx, "send called with no data", NULL, 0);
-        ret = -1;
+        ret = UDS_ERR_GENERIC;
     }
 
     return ret;
@@ -382,7 +411,7 @@ static uint8_t i_uds_svc_session_control(uds_context_t *ctx, const uds_time_t *t
                                          const uint8_t *data, size_t data_len, uint8_t *res_data,
                                          size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -392,8 +421,8 @@ static uint8_t i_uds_svc_session_control(uds_context_t *ctx, const uds_time_t *t
     }
     else
     {
-        uint8_t requested_session = UDS_GET_SUBFUNCTION(data[0]);
-        unsigned long s;
+        uint8_t requested_session = i_uds_get_subfunction(data[0]);
+        uint8_t s;
 
         for (s = 0U; s < ctx->config->num_session_config; s++)
         {
@@ -402,7 +431,7 @@ static uint8_t i_uds_svc_session_control(uds_context_t *ctx, const uds_time_t *t
             {
                 uds_info(ctx, "entering session", "session", requested_session);
 
-                if (i_uds_sa_vs_session_check(ctx, ctx->current_sa, session_config) != 0)
+                if (i_uds_sa_vs_session_check(ctx, ctx->current_sa, session_config) != UDS_NO_ERROR)
                 {
                     uds_info(ctx, "secure access not allowed in new session, reset it", NULL, 0);
                     i_uds_reset_secure_access(ctx);
@@ -418,7 +447,7 @@ static uint8_t i_uds_svc_session_control(uds_context_t *ctx, const uds_time_t *t
             uds_info(ctx, "requested session not available", "session", requested_session);
             nrc = UDS_NRC_SFNS;
         }
-        else if (UDS_SUPPRESS_PR(data[0]))
+        else if (i_uds_suppress_pr(data[0]))
         {
             nrc = UDS_SPRMINB;
         }
@@ -427,8 +456,8 @@ static uint8_t i_uds_svc_session_control(uds_context_t *ctx, const uds_time_t *t
             const uds_session_cfg_t *session_config = &ctx->config->session_config[s];
             nrc = UDS_NRC_PR;
             res_data[0] = requested_session;
-            i_uds_store_big_endian(&res_data[1], session_config->p2_timeout_ms, 2U);
-            i_uds_store_big_endian(&res_data[3], session_config->p2star_timeout_ms, 2U);
+            i_uds_store_uint16_big_endian(&res_data[1], session_config->p2_timeout_ms);
+            i_uds_store_uint16_big_endian(&res_data[3], session_config->p2star_timeout_ms);
             *res_data_len = 5U;
         }
     }
@@ -442,7 +471,7 @@ static uint8_t i_uds_svc_ecu_reset(uds_context_t *ctx, const uds_time_t *timesta
                                    const uint8_t *data, size_t data_len, uint8_t *res_data,
                                    size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
     uint8_t reset_type = 0;
 
     UDS_UNUSED(timestamp);
@@ -453,19 +482,19 @@ static uint8_t i_uds_svc_ecu_reset(uds_context_t *ctx, const uds_time_t *timesta
     }
     else
     {
-        reset_type = UDS_GET_SUBFUNCTION(data[0]);
+        reset_type = i_uds_get_subfunction(data[0]);
 
         if ((reset_type == UDS_LEV_RT_HR) && (ctx->config->ecureset.cb_reset_hard != NULL))
         {
-            if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_reset_hard) != 0)
+            if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_reset_hard) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SFNSIAS;
             }
-            else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_reset_hard) != 0)
+            else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_reset_hard) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SAD;
             }
-            else if (ctx->config->ecureset.cb_reset_hard(ctx->priv) != 0)
+            else if (ctx->config->ecureset.cb_reset_hard(ctx->priv) != UDS_NO_ERROR)
             {
                 uds_err(ctx, "cb_reset_hard failed", NULL, 0);
                 nrc = UDS_NRC_FPEORA;
@@ -478,15 +507,15 @@ static uint8_t i_uds_svc_ecu_reset(uds_context_t *ctx, const uds_time_t *timesta
         else if ((reset_type == UDS_LEV_RT_KOFFONR) &&
                  (ctx->config->ecureset.cb_reset_keyoffon != NULL))
         {
-            if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_reset_keyoffon) != 0)
+            if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_reset_keyoffon) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SFNSIAS;
             }
-            else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_reset_keyoffon) != 0)
+            else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_reset_keyoffon) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SAD;
             }
-            else if (ctx->config->ecureset.cb_reset_keyoffon(ctx->priv) != 0)
+            else if (ctx->config->ecureset.cb_reset_keyoffon(ctx->priv) != UDS_NO_ERROR)
             {
                 uds_err(ctx, "cb_reset_keyoffon failed", NULL, 0);
                 nrc = UDS_NRC_FPEORA;
@@ -498,15 +527,15 @@ static uint8_t i_uds_svc_ecu_reset(uds_context_t *ctx, const uds_time_t *timesta
         }
         else if ((UDS_LEV_RT_SR == reset_type) && (ctx->config->ecureset.cb_reset_soft != NULL))
         {
-            if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_reset_soft) != 0)
+            if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_reset_soft) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SFNSIAS;
             }
-            else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_reset_soft) != 0)
+            else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_reset_soft) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SAD;
             }
-            else if (ctx->config->ecureset.cb_reset_soft(ctx->priv) != 0)
+            else if (ctx->config->ecureset.cb_reset_soft(ctx->priv) != UDS_NO_ERROR)
             {
                 uds_err(ctx, "cb_reset_soft failed", NULL, 0);
                 nrc = UDS_NRC_FPEORA;
@@ -522,15 +551,15 @@ static uint8_t i_uds_svc_ecu_reset(uds_context_t *ctx, const uds_time_t *timesta
             {
                 nrc = UDS_NRC_IMLOIF;
             }
-            else if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_rps) != 0)
+            else if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_rps) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SFNSIAS;
             }
-            else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_rps) != 0)
+            else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_rps) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SAD;
             }
-            else if (ctx->config->ecureset.cb_enable_rps(ctx->priv, data[1]) != 0)
+            else if (ctx->config->ecureset.cb_enable_rps(ctx->priv, data[1]) != UDS_NO_ERROR)
             {
                 uds_err(ctx, "cb_enable_rps failed", NULL, 0);
                 nrc = UDS_NRC_FPEORA;
@@ -542,15 +571,15 @@ static uint8_t i_uds_svc_ecu_reset(uds_context_t *ctx, const uds_time_t *timesta
         }
         else if ((reset_type == UDS_LEV_RT_DRPSD) && (ctx->config->ecureset.cb_disable_rps != NULL))
         {
-            if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_rps) != 0)
+            if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_rps) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SFNSIAS;
             }
-            else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_rps) != 0)
+            else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_rps) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SAD;
             }
-            else if (ctx->config->ecureset.cb_disable_rps(ctx->priv) != 0)
+            else if (ctx->config->ecureset.cb_disable_rps(ctx->priv) != UDS_NO_ERROR)
             {
                 uds_err(ctx, "cb_enable_rps failed", NULL, 0);
                 nrc = UDS_NRC_FPEORA;
@@ -563,15 +592,15 @@ static uint8_t i_uds_svc_ecu_reset(uds_context_t *ctx, const uds_time_t *timesta
         else if ((reset_type >= UDS_LEV_RT_VMS_MIN) && (reset_type <= UDS_LEV_RT_VMS_MAX) &&
                  (ctx->config->ecureset.cb_reset_vms != NULL))
         {
-            if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_reset_vms) != 0)
+            if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_reset_vms) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SFNSIAS;
             }
-            else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_reset_vms) != 0)
+            else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_reset_vms) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SAD;
             }
-            else if (ctx->config->ecureset.cb_reset_vms(ctx->priv, reset_type) != 0)
+            else if (ctx->config->ecureset.cb_reset_vms(ctx->priv, reset_type) != UDS_NO_ERROR)
             {
                 uds_err(ctx, "cb_reset_vms failed", "reset type", reset_type);
                 nrc = UDS_NRC_FPEORA;
@@ -584,15 +613,15 @@ static uint8_t i_uds_svc_ecu_reset(uds_context_t *ctx, const uds_time_t *timesta
         else if ((reset_type >= UDS_LEV_RT_SSS_MIN) && (reset_type <= UDS_LEV_RT_SSS_MAX) &&
                  (ctx->config->ecureset.cb_reset_sss != NULL))
         {
-            if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_reset_sss) != 0)
+            if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_reset_sss) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SFNSIAS;
             }
-            else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_reset_sss) != 0)
+            else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_reset_sss) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SAD;
             }
-            else if (ctx->config->ecureset.cb_reset_sss(ctx->priv, reset_type) != 0)
+            else if (ctx->config->ecureset.cb_reset_sss(ctx->priv, reset_type) != UDS_NO_ERROR)
             {
                 uds_err(ctx, "cb_reset_sss failed", "reset type", reset_type);
                 nrc = UDS_NRC_FPEORA;
@@ -610,7 +639,7 @@ static uint8_t i_uds_svc_ecu_reset(uds_context_t *ctx, const uds_time_t *timesta
 
     if (nrc == UDS_NRC_PR)
     {
-        if (UDS_SUPPRESS_PR(data[0]))
+        if (i_uds_suppress_pr(data[0]))
         {
             nrc = UDS_SPRMINB;
         }
@@ -626,15 +655,11 @@ static uint8_t i_uds_svc_ecu_reset(uds_context_t *ctx, const uds_time_t *timesta
     return nrc;
 }
 
-static inline int i_uds_security_access_max_attempts_exceeded(uds_context_t *ctx)
+static inline bool i_uds_security_access_max_attempts_exceeded(const uds_context_t *ctx)
 {
-    int exceeded = 0;
-    if ((ctx->config != NULL) && (ctx->sa_failed_attempts >= ctx->config->sa_max_attempts) &&
-        (ctx->config->sa_max_attempts != 0U) && (ctx->config->sa_delay_timer_ms > 0U))
-    {
-        exceeded = 1;
-    }
-    return exceeded;
+    return ((ctx->config != NULL) &&
+            (ctx->sa_failed_attempts >= ctx->config->sa_max_attempts) &&
+            (ctx->config->sa_max_attempts != 0U) && (ctx->config->sa_delay_timer_ms > 0));
 }
 
 static inline void i_uds_security_access_reset_failed_attempts(uds_context_t *ctx)
@@ -656,7 +681,7 @@ static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const uds_time_t *t
                                          const uint8_t *data, size_t data_len, uint8_t *res_data,
                                          size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     if (data_len < 1U)
     {
@@ -664,7 +689,7 @@ static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const uds_time_t *t
     }
     else
     {
-        uint8_t sat = UDS_GET_SUBFUNCTION(data[0]);
+        uint8_t sat = i_uds_get_subfunction(data[0]);
         uint8_t sa_index = i_uds_sat_to_sa_index(sat);
 
         size_t in_data_len = (data_len - 1U);
@@ -684,13 +709,13 @@ static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const uds_time_t *t
         {
             nrc = UDS_NRC_SFNSIAS;
         }
-        else if (i_uds_security_access_max_attempts_exceeded(ctx) != 0)
+        else if (i_uds_security_access_max_attempts_exceeded(ctx))
         {
             nrc = UDS_NRC_RTDNE;
         }
         else if ((sat & UDS_LEV_SAT_RSD) == UDS_LEV_SAT_RSD) // Request Seed
         {
-            unsigned long l;
+            uint8_t l;
 
             uds_debug(ctx, "request seed", "sa_index", sa_index);
 
@@ -702,11 +727,11 @@ static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const uds_time_t *t
                     if (sa_config->cb_request_seed != NULL)
                     {
                         size_t seed_len = (*res_data_len - 1U);
-                        int ret;
+                        uds_err_e ret;
 
                         ret = sa_config->cb_request_seed(ctx->priv, sa_index, in_data, in_data_len,
                                                          &res_data[1], &seed_len);
-                        if (ret < 0)
+                        if (ret != UDS_NO_ERROR)
                         {
                             uds_err(ctx, "request seed failed", "sa_index", sa_index);
                             nrc = UDS_NRC_ROOR;
@@ -718,7 +743,7 @@ static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const uds_time_t *t
                             if ((ctx->current_sa != NULL) &&
                                 (ctx->current_sa->sa_index == sa_index))
                             {
-                                (void)memset(&res_data[1U], 0x00U, seed_len);
+                                (void)memset(&res_data[1U], 0, seed_len);
                             }
                             else
                             {
@@ -737,6 +762,11 @@ static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const uds_time_t *t
                     break;
                 }
             }
+
+            if (l == ctx->config->num_sa_config)
+            {
+                nrc = UDS_NRC_SFNS;
+            }
         }
         else if (ctx->current_sa_seed != sa_index)
         {
@@ -745,7 +775,7 @@ static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const uds_time_t *t
         }
         else // Send Key
         {
-            unsigned long l;
+            uint8_t l;
 
             uds_debug(ctx, "validate key", "sa_index", sa_index);
 
@@ -756,15 +786,15 @@ static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const uds_time_t *t
                 {
                     if (sa_config->cb_validate_key != NULL)
                     {
-                        int ret;
+                        uds_err_e ret;
 
                         ret = sa_config->cb_validate_key(ctx->priv, sa_index, in_data, in_data_len);
-                        if (ret < 0)
+                        if (ret != UDS_NO_ERROR)
                         {
                             uds_info(ctx, "validate key failed", "sa_index", sa_index);
 
                             ctx->sa_failed_attempts++;
-                            if (i_uds_security_access_max_attempts_exceeded(ctx) != 0)
+                            if (i_uds_security_access_max_attempts_exceeded(ctx))
                             {
                                 i_uds_security_access_start_delay_timer(ctx, timestamp);
                                 nrc = UDS_NRC_ENOA;
@@ -787,9 +817,15 @@ static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const uds_time_t *t
                     else
                     {
                         uds_err(ctx, "validate key callback not defined", "sa_index", sa_index);
+                        nrc = UDS_NRC_SFNS;
                     }
                     break;
                 }
+            }
+
+            if (l == ctx->config->num_sa_config)
+            {
+                nrc = UDS_NRC_SFNS;
             }
         }
     }
@@ -803,7 +839,7 @@ static uint8_t i_uds_svc_communication_control(uds_context_t *ctx, const uds_tim
                                                const uint8_t *data, size_t data_len,
                                                uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -813,11 +849,11 @@ static uint8_t i_uds_svc_communication_control(uds_context_t *ctx, const uds_tim
     }
     else
     {
-        uds_cc_action_e action;
+        uds_cc_action_e action = UDS_CCACT_EN_RX_EN_TX;
         uds_cc_message_type_e message_type = UDS_CCMT_NONE;
         uint8_t subnet_address = 0x00;
         uint16_t enhanced_address = 0x0000;
-        uint8_t ct = UDS_GET_SUBFUNCTION(data[0]);
+        uint8_t ct = i_uds_get_subfunction(data[0]);
 
         /* nrc will be checked after parsing of parameters */
         nrc = UDS_NRC_PR;
@@ -844,7 +880,7 @@ static uint8_t i_uds_svc_communication_control(uds_context_t *ctx, const uds_tim
             else
             {
                 action = UDS_CCACT_EN_RX_DIS_TX_EAI;
-                enhanced_address = UDS_LOAD_UINT16_BIG_ENDIAN(&data[2]);
+                enhanced_address = i_uds_load_uint16_big_endian(&data[2]);
             }
             break;
         case UDS_LEV_CTRLTP_ERXTXWEAI:
@@ -855,15 +891,15 @@ static uint8_t i_uds_svc_communication_control(uds_context_t *ctx, const uds_tim
             else
             {
                 action = UDS_CCACT_EN_RX_EN_TX_EAI;
-                enhanced_address = UDS_LOAD_UINT16_BIG_ENDIAN(&data[2]);
+                enhanced_address = i_uds_load_uint16_big_endian(&data[2]);
             }
             break;
         default:
-            action = ct;
+            nrc = UDS_NRC_ROOR;
             break;
         }
 
-        switch (UDS_LOW_NIBBLE(data[1]) & 0x03U)
+        switch (data[1] & 0x03U)
         {
         case UDS_CTP_NCM:
             message_type = UDS_CCMT_NORMAL;
@@ -879,33 +915,33 @@ static uint8_t i_uds_svc_communication_control(uds_context_t *ctx, const uds_tim
             break;
         }
 
-        subnet_address = UDS_HIGH_NIBBLE(data[1]);
+        subnet_address = (data[1] >> 4U) & 0x0FU;
 
         if (nrc != UDS_NRC_PR)
         {
             uds_warning(ctx, "communication control cannot be performed due to bad request", NULL,
                         0);
         }
-        else if (i_uds_session_check(ctx, &ctx->config->communication_control.sec) != 0)
+        else if (i_uds_session_check(ctx, &ctx->config->communication_control.sec) != UDS_NO_ERROR)
         {
             nrc = UDS_NRC_SFNSIAS;
         }
-        else if (i_uds_security_check(ctx, &ctx->config->communication_control.sec) != 0)
+        else if (i_uds_security_check(ctx, &ctx->config->communication_control.sec) != UDS_NO_ERROR)
         {
             nrc = UDS_NRC_SAD;
         }
         else
         {
-            int ret;
+            uds_err_e ret;
 
             ret = ctx->config->communication_control.cb_control(ctx->priv, action, message_type,
                                                                 subnet_address, enhanced_address);
-            if (ret < 0)
+            if (ret != UDS_NO_ERROR)
             {
                 uds_err(ctx, "cb_control failed", NULL, 0);
                 nrc = UDS_NRC_CNC;
             }
-            else if (UDS_SUPPRESS_PR(data[0]))
+            else if (i_uds_suppress_pr(data[0]))
             {
                 nrc = UDS_SPRMINB;
             }
@@ -927,7 +963,7 @@ static uint8_t i_uds_svc_tester_present(uds_context_t *ctx, const uds_time_t *ti
                                         const uint8_t *data, size_t data_len, uint8_t *res_data,
                                         size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(ctx);
     UDS_UNUSED(timestamp);
@@ -936,11 +972,11 @@ static uint8_t i_uds_svc_tester_present(uds_context_t *ctx, const uds_time_t *ti
     {
         nrc = UDS_NRC_IMLOIF;
     }
-    else if (UDS_LEV_ZSUBF != UDS_GET_SUBFUNCTION(data[0]))
+    else if (i_uds_get_subfunction(data[0]) != UDS_LEV_ZSUBF)
     {
         nrc = UDS_NRC_IMLOIF;
     }
-    else if (UDS_SUPPRESS_PR(data[0]))
+    else if (i_uds_suppress_pr(data[0]))
     {
         nrc = UDS_SPRMINB;
     }
@@ -960,7 +996,7 @@ static uint8_t i_uds_svc_access_timing_parameters(uds_context_t *ctx, const uds_
                                                   const uint8_t *data, size_t data_len,
                                                   uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -968,19 +1004,19 @@ static uint8_t i_uds_svc_access_timing_parameters(uds_context_t *ctx, const uds_
     {
         nrc = UDS_NRC_IMLOIF;
     }
-    else if (i_uds_session_check(ctx, &ctx->config->access_timings_params.sec) != 0)
+    else if (i_uds_session_check(ctx, &ctx->config->access_timings_params.sec) != UDS_NO_ERROR)
     {
         nrc = UDS_NRC_SFNSIAS;
     }
-    else if (i_uds_security_check(ctx, &ctx->config->access_timings_params.sec) != 0)
+    else if (i_uds_security_check(ctx, &ctx->config->access_timings_params.sec) != UDS_NO_ERROR)
     {
         nrc = UDS_NRC_SAD;
     }
     else
     {
-        uint8_t access_type = UDS_GET_SUBFUNCTION(data[0]);
+        uint8_t access_type = i_uds_get_subfunction(data[0]);
         size_t out_data_len = (*res_data_len - 1U);
-        int ret;
+        uds_err_e ret = UDS_NO_ERROR;
 
         nrc = UDS_NRC_PR;
 
@@ -1020,12 +1056,12 @@ static uint8_t i_uds_svc_access_timing_parameters(uds_context_t *ctx, const uds_
             uds_warning(ctx, "access to timings parameters cannot be performed due to bad request",
                         NULL, 0);
         }
-        else if (ret < 0)
+        else if (ret != UDS_NO_ERROR)
         {
             uds_err(ctx, "cb for access_timings_params failed", NULL, 0);
             nrc = UDS_NRC_FPEORA;
         }
-        else if (UDS_SUPPRESS_PR(data[0]))
+        else if (i_uds_suppress_pr(data[0]))
         {
             nrc = UDS_SPRMINB;
         }
@@ -1045,7 +1081,7 @@ static uint8_t i_uds_svc_control_dtc_settings(uds_context_t *ctx, const uds_time
                                               const uint8_t *data, size_t data_len,
                                               uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -1055,7 +1091,7 @@ static uint8_t i_uds_svc_control_dtc_settings(uds_context_t *ctx, const uds_time
     }
     else
     {
-        uint8_t dtc_setting_type = UDS_GET_SUBFUNCTION(data[0]);
+        uint8_t dtc_setting_type = i_uds_get_subfunction(data[0]);
         const uint8_t *ext_data = NULL;
         size_t ext_data_len = 0U;
 
@@ -1068,15 +1104,15 @@ static uint8_t i_uds_svc_control_dtc_settings(uds_context_t *ctx, const uds_time
         if ((dtc_setting_type == UDS_LEV_DTCSTP_ON) &&
             (ctx->config->dtc_settings.cb_dtc_on != NULL))
         {
-            if (i_uds_session_check(ctx, &ctx->config->dtc_settings.sec_dtc_on) != 0)
+            if (i_uds_session_check(ctx, &ctx->config->dtc_settings.sec_dtc_on) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SFNSIAS;
             }
-            else if (i_uds_security_check(ctx, &ctx->config->dtc_settings.sec_dtc_on) != 0)
+            else if (i_uds_security_check(ctx, &ctx->config->dtc_settings.sec_dtc_on) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SAD;
             }
-            else if (ctx->config->dtc_settings.cb_dtc_on(ctx->priv, ext_data, ext_data_len) != 0)
+            else if (ctx->config->dtc_settings.cb_dtc_on(ctx->priv, ext_data, ext_data_len) != UDS_NO_ERROR)
             {
                 uds_err(ctx, "cb_dtc_on failed", NULL, 0);
                 nrc = UDS_NRC_FPEORA;
@@ -1089,15 +1125,15 @@ static uint8_t i_uds_svc_control_dtc_settings(uds_context_t *ctx, const uds_time
         else if ((dtc_setting_type == UDS_LEV_DTCSTP_OFF) &&
                  (ctx->config->dtc_settings.cb_dtc_off != NULL))
         {
-            if (i_uds_session_check(ctx, &ctx->config->dtc_settings.sec_dtc_off) != 0)
+            if (i_uds_session_check(ctx, &ctx->config->dtc_settings.sec_dtc_off) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SFNSIAS;
             }
-            else if (i_uds_security_check(ctx, &ctx->config->dtc_settings.sec_dtc_off) != 0)
+            else if (i_uds_security_check(ctx, &ctx->config->dtc_settings.sec_dtc_off) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SAD;
             }
-            else if (ctx->config->dtc_settings.cb_dtc_off(ctx->priv, ext_data, ext_data_len) != 0)
+            else if (ctx->config->dtc_settings.cb_dtc_off(ctx->priv, ext_data, ext_data_len) != UDS_NO_ERROR)
             {
                 uds_err(ctx, "cb_dtc_off failed", NULL, 0);
                 nrc = UDS_NRC_FPEORA;
@@ -1111,17 +1147,16 @@ static uint8_t i_uds_svc_control_dtc_settings(uds_context_t *ctx, const uds_time
                  (dtc_setting_type <= UDS_LEV_DTCSTP_VMS_MAX) &&
                  (ctx->config->dtc_settings.cb_dtc_settings_vms != NULL))
         {
-            if (i_uds_session_check(ctx, &ctx->config->dtc_settings.sec_dtc_settings_vms) != 0)
+            if (i_uds_session_check(ctx, &ctx->config->dtc_settings.sec_dtc_settings_vms) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SFNSIAS;
             }
-            else if (i_uds_security_check(ctx, &ctx->config->dtc_settings.sec_dtc_settings_vms) !=
-                     0)
+            else if (i_uds_security_check(ctx, &ctx->config->dtc_settings.sec_dtc_settings_vms) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SAD;
             }
             else if (ctx->config->dtc_settings.cb_dtc_settings_vms(ctx->priv, dtc_setting_type,
-                                                                   ext_data, ext_data_len) != 0)
+                                                                   ext_data, ext_data_len) != UDS_NO_ERROR)
             {
                 uds_err(ctx, "cb_dtc_settings_vms failed", "DTC setting type", dtc_setting_type);
                 nrc = UDS_NRC_FPEORA;
@@ -1135,17 +1170,16 @@ static uint8_t i_uds_svc_control_dtc_settings(uds_context_t *ctx, const uds_time
                  (dtc_setting_type <= UDS_LEV_DTCSTP_SSS_MAX) &&
                  (ctx->config->dtc_settings.cb_dtc_settings_sss != NULL))
         {
-            if (i_uds_session_check(ctx, &ctx->config->dtc_settings.sec_dtc_settings_sss) != 0)
+            if (i_uds_session_check(ctx, &ctx->config->dtc_settings.sec_dtc_settings_sss) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SFNSIAS;
             }
-            else if (i_uds_security_check(ctx, &ctx->config->dtc_settings.sec_dtc_settings_sss) !=
-                     0)
+            else if (i_uds_security_check(ctx, &ctx->config->dtc_settings.sec_dtc_settings_sss) != UDS_NO_ERROR)
             {
                 nrc = UDS_NRC_SAD;
             }
             else if (ctx->config->dtc_settings.cb_dtc_settings_sss(ctx->priv, dtc_setting_type,
-                                                                   ext_data, ext_data_len) != 0)
+                                                                   ext_data, ext_data_len) != UDS_NO_ERROR)
             {
                 uds_err(ctx, "cb_dtc_settings_sss failed", "DTC setting type", dtc_setting_type);
                 nrc = UDS_NRC_FPEORA;
@@ -1162,7 +1196,7 @@ static uint8_t i_uds_svc_control_dtc_settings(uds_context_t *ctx, const uds_time
 
         if (nrc == UDS_NRC_PR)
         {
-            if (UDS_SUPPRESS_PR(data[0]))
+            if (i_uds_suppress_pr(data[0]))
             {
                 nrc = UDS_SPRMINB;
             }
@@ -1183,9 +1217,7 @@ static uint8_t i_uds_svc_link_control(uds_context_t *ctx, const uds_time_t *time
                                       const uint8_t *data, size_t data_len, uint8_t *res_data,
                                       size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
-    uint8_t link_control_type = 0x00U;
-    int ret = -1;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -1193,17 +1225,18 @@ static uint8_t i_uds_svc_link_control(uds_context_t *ctx, const uds_time_t *time
     {
         nrc = UDS_NRC_IMLOIF;
     }
-    else if (i_uds_session_check(ctx, &ctx->config->link_control.sec) != 0)
+    else if (i_uds_session_check(ctx, &ctx->config->link_control.sec) != UDS_NO_ERROR)
     {
         nrc = UDS_NRC_SFNSIAS;
     }
-    else if (i_uds_security_check(ctx, &ctx->config->link_control.sec) != 0)
+    else if (i_uds_security_check(ctx, &ctx->config->link_control.sec) != UDS_NO_ERROR)
     {
         nrc = UDS_NRC_SAD;
     }
     else
     {
-        link_control_type = UDS_GET_SUBFUNCTION(data[0]);
+        uint8_t link_control_type = i_uds_get_subfunction(data[0]);
+        uds_err_e ret;
 
         switch (link_control_type)
         {
@@ -1219,7 +1252,7 @@ static uint8_t i_uds_svc_link_control(uds_context_t *ctx, const uds_time_t *time
             else
             {
                 ret = ctx->config->link_control.cb_verify_mode_fixed(ctx->priv, data[1]);
-                if (ret < 0)
+                if (ret != UDS_NO_ERROR)
                 {
                     nrc = UDS_NRC_CNC;
                 }
@@ -1243,7 +1276,7 @@ static uint8_t i_uds_svc_link_control(uds_context_t *ctx, const uds_time_t *time
             {
                 ret = ctx->config->link_control.cb_verify_mode_specified(ctx->priv, &data[1],
                                                                          (data_len - 1U));
-                if (ret < 0)
+                if (ret != UDS_NO_ERROR)
                 {
                     nrc = UDS_NRC_CNC;
                 }
@@ -1266,7 +1299,7 @@ static uint8_t i_uds_svc_link_control(uds_context_t *ctx, const uds_time_t *time
             else
             {
                 ret = ctx->config->link_control.cb_transition_mode(ctx->priv);
-                if (ret < 0)
+                if (ret != UDS_NO_ERROR)
                 {
                     nrc = UDS_NRC_CNC;
                 }
@@ -1286,7 +1319,7 @@ static uint8_t i_uds_svc_link_control(uds_context_t *ctx, const uds_time_t *time
             {
                 ret = ctx->config->link_control.cb_specific(ctx->priv, link_control_type, &data[1],
                                                             (data_len - 1U));
-                if (ret < 0)
+                if (ret != UDS_NO_ERROR)
                 {
                     nrc = UDS_NRC_CNC;
                 }
@@ -1297,18 +1330,18 @@ static uint8_t i_uds_svc_link_control(uds_context_t *ctx, const uds_time_t *time
             }
             break;
         }
-    }
 
-    if (nrc == UDS_NRC_PR)
-    {
-        if (UDS_SUPPRESS_PR(data[0]))
+        if (nrc == UDS_NRC_PR)
         {
-            nrc = UDS_SPRMINB;
-        }
-        else
-        {
-            res_data[0] = link_control_type;
-            *res_data_len = 1;
+            if (i_uds_suppress_pr(data[0]))
+            {
+                nrc = UDS_SPRMINB;
+            }
+            else
+            {
+                res_data[0] = link_control_type;
+                *res_data_len = 1;
+            }
         }
     }
 
@@ -1321,7 +1354,7 @@ static uint8_t i_uds_svc_read_data_by_identifier(uds_context_t *ctx, const uds_t
                                                  const uint8_t *data, size_t data_len,
                                                  uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -1337,14 +1370,14 @@ static uint8_t i_uds_svc_read_data_by_identifier(uds_context_t *ctx, const uds_t
     }
     else
     {
-        size_t data_start = 0U;
+        size_t data_start;
         size_t res_data_used = 0U;
 
-        nrc = UDS_NRC_PR;
+        nrc = UDS_NRC_ROOR;
         for (data_start = 0U; data_start < data_len; data_start += 2U)
         {
-            uint16_t identifier = UDS_LOAD_UINT16_BIG_ENDIAN(&data[data_start]);
-            unsigned long d;
+            uint16_t identifier = i_uds_load_uint16_big_endian(&data[data_start]);
+            uint16_t d;
 
             uds_debug(ctx, "requested to read DID", "DID", identifier);
 
@@ -1356,12 +1389,14 @@ static uint8_t i_uds_svc_read_data_by_identifier(uds_context_t *ctx, const uds_t
                     if (data_item->cb_read == NULL)
                     {
                         uds_info(ctx, "cb_read not defined", "DID", identifier);
+                        nrc = UDS_NRC_ROOR;
                     }
-                    else if (i_uds_session_check(ctx, &data_item->sec_read) != 0)
+                    else if (i_uds_session_check(ctx, &data_item->sec_read) != UDS_NO_ERROR)
                     {
                         uds_debug(ctx, "DID cannot be read in active session", "DID", identifier);
+                        nrc = UDS_NRC_ROOR;
                     }
-                    else if (i_uds_security_check(ctx, &data_item->sec_read) != 0)
+                    else if (i_uds_security_check(ctx, &data_item->sec_read) != UDS_NO_ERROR)
                     {
                         uds_debug(ctx, "DID cannot be read with current SA", "DID", identifier);
                         nrc = UDS_NRC_SAD;
@@ -1374,9 +1409,9 @@ static uint8_t i_uds_svc_read_data_by_identifier(uds_context_t *ctx, const uds_t
                     else
                     {
                         size_t res_data_item_len;
-                        int ret;
+                        uds_err_e ret;
 
-                        i_uds_store_big_endian(&res_data[res_data_used], identifier, 2U);
+                        i_uds_store_uint16_big_endian(&res_data[res_data_used], identifier);
                         res_data_used += 2U;
                         res_data_item_len = *res_data_len - res_data_used;
                         ret = data_item->cb_read(ctx->priv, identifier, &res_data[res_data_used],
@@ -1386,7 +1421,7 @@ static uint8_t i_uds_svc_read_data_by_identifier(uds_context_t *ctx, const uds_t
                             uds_info(ctx, "not enough space for data", "DID", identifier);
                             nrc = UDS_NRC_RTL;
                         }
-                        else if (ret != 0)
+                        else if (ret != UDS_NO_ERROR)
                         {
                             uds_err(ctx, "failed to read", "DID", identifier);
                             nrc = UDS_NRC_FPEORA;
@@ -1395,6 +1430,7 @@ static uint8_t i_uds_svc_read_data_by_identifier(uds_context_t *ctx, const uds_t
                         {
                             uds_debug(ctx, "DID read successfully", "DID", identifier);
                             res_data_used += res_data_item_len;
+                            nrc = UDS_NRC_PR;
                         }
                     }
                     break;
@@ -1435,7 +1471,7 @@ static uint8_t i_uds_svc_read_memory_by_address(uds_context_t *ctx, const uds_ti
                                                 const uint8_t *data, size_t data_len,
                                                 uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -1445,8 +1481,8 @@ static uint8_t i_uds_svc_read_memory_by_address(uds_context_t *ctx, const uds_ti
     }
     else
     {
-        size_t addr_len = UDS_LOW_NIBBLE(data[0]);
-        size_t size_len = UDS_HIGH_NIBBLE(data[0]);
+        size_t addr_len = ((size_t)data[0] & 0x0FU);
+        size_t size_len = (((size_t)data[0] >> 4U) & 0x0FU);
 
         if ((1U + addr_len + size_len) > data_len)
         {
@@ -1456,26 +1492,16 @@ static uint8_t i_uds_svc_read_memory_by_address(uds_context_t *ctx, const uds_ti
         {
             uintptr_t addr = 0U;
             size_t size = 0U;
-            int ret;
 
-            nrc = UDS_NRC_PR;
-
-            ret = i_uds_load_big_endian_addr(&data[1], addr_len, &addr);
-            if (ret != 0)
+            if (i_uds_load_big_endian_addr(&data[1], addr_len, &addr) != UDS_NO_ERROR)
             {
+                uds_debug(ctx, "requested memory read with invalid address", NULL, 0);
                 nrc = UDS_NRC_ROOR;
             }
-
-            ret = i_uds_load_big_endian_size(&data[1U + addr_len], size_len, &size);
-            if (ret != 0)
+            else if (i_uds_load_big_endian_size(&data[1U + addr_len], size_len, &size) != UDS_NO_ERROR)
             {
+                uds_debug(ctx, "requested memory read with invalid size", NULL, 0);
                 nrc = UDS_NRC_ROOR;
-            }
-
-            if (nrc != UDS_NRC_PR)
-            {
-                uds_debug(ctx, "requested memory read with invalid parameters", NULL, 0);
-                // Nothing to do, NRC is already set
             }
             else if (size == 0U)
             {
@@ -1484,7 +1510,7 @@ static uint8_t i_uds_svc_read_memory_by_address(uds_context_t *ctx, const uds_ti
             }
             else
             {
-                unsigned long p;
+                uintptr_t p;
 
                 uds_debug(ctx, "request to read memory", "address", addr);
                 uds_debug(ctx, "request to read memory", "size", size);
@@ -1501,18 +1527,20 @@ static uint8_t i_uds_svc_read_memory_by_address(uds_context_t *ctx, const uds_ti
                             uds_debug(ctx, "memory read size too large", NULL, 0);
                             nrc = UDS_NRC_ROOR;
                         }
-                        else if (i_uds_session_check(ctx, &mem_region->sec_read) != 0)
+                        else if (i_uds_session_check(ctx, &mem_region->sec_read) != UDS_NO_ERROR)
                         {
                             nrc = UDS_NRC_ROOR;
                         }
-                        else if (i_uds_security_check(ctx, &mem_region->sec_read) != 0)
+                        else if (i_uds_security_check(ctx, &mem_region->sec_read) != UDS_NO_ERROR)
                         {
                             nrc = UDS_NRC_SAD;
                         }
                         else
                         {
+                            uds_err_e ret;
+
                             ret = mem_region->cb_read(ctx->priv, addr, &res_data[0], size);
-                            if (ret != 0)
+                            if (ret != UDS_NO_ERROR)
                             {
                                 uds_err(ctx, "failed to read memory", "address", addr);
                                 nrc = UDS_NRC_GR;
@@ -1546,7 +1574,7 @@ static uint8_t i_uds_svc_read_scaling_data_by_identifier(uds_context_t *ctx,
                                                          const uint8_t *data, size_t data_len,
                                                          uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -1556,8 +1584,8 @@ static uint8_t i_uds_svc_read_scaling_data_by_identifier(uds_context_t *ctx,
     }
     else
     {
-        uint16_t identifier = UDS_LOAD_UINT16_BIG_ENDIAN(&data[0]);
-        unsigned long d;
+        uint16_t identifier = i_uds_load_uint16_big_endian(&data[0]);
+        uint16_t d;
 
         uds_debug(ctx, "requested to read scaling data", "DID", identifier);
 
@@ -1572,12 +1600,12 @@ static uint8_t i_uds_svc_read_scaling_data_by_identifier(uds_context_t *ctx,
                     uds_info(ctx, "scaling data not defined", "DID", identifier);
                     nrc = UDS_NRC_ROOR;
                 }
-                else if (i_uds_session_check(ctx, &data_item->sec_read) != 0)
+                else if (i_uds_session_check(ctx, &data_item->sec_read) != UDS_NO_ERROR)
                 {
                     uds_debug(ctx, "DID cannot be read in active session", "DID", identifier);
                     nrc = UDS_NRC_ROOR;
                 }
-                else if (i_uds_security_check(ctx, &data_item->sec_read) != 0)
+                else if (i_uds_security_check(ctx, &data_item->sec_read) != UDS_NO_ERROR)
                 {
                     uds_debug(ctx, "DID cannot be read with current SA", "DID", identifier);
                     nrc = UDS_NRC_SAD;
@@ -1590,7 +1618,7 @@ static uint8_t i_uds_svc_read_scaling_data_by_identifier(uds_context_t *ctx,
                 else
                 {
                     nrc = UDS_NRC_PR;
-                    i_uds_store_big_endian(&res_data[0], identifier, 2U);
+                    i_uds_store_uint16_big_endian(&res_data[0], identifier);
                     (void)memcpy(&res_data[2], data_item->scaling_data,
                                  data_item->scaling_data_size);
                     *res_data_len = (2U + data_item->scaling_data_size);
@@ -1609,7 +1637,7 @@ static uint8_t i_uds_svc_write_data_by_identifier(uds_context_t *ctx, const uds_
                                                   const uint8_t *data, size_t data_len,
                                                   uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -1619,8 +1647,8 @@ static uint8_t i_uds_svc_write_data_by_identifier(uds_context_t *ctx, const uds_
     }
     else
     {
-        uint16_t identifier = UDS_LOAD_UINT16_BIG_ENDIAN(&data[0]);
-        unsigned long d;
+        uint16_t identifier = i_uds_load_uint16_big_endian(&data[0]);
+        uint16_t d;
 
         uds_debug(ctx, "requested to write DID", "DID", identifier);
 
@@ -1635,22 +1663,22 @@ static uint8_t i_uds_svc_write_data_by_identifier(uds_context_t *ctx, const uds_
                     uds_info(ctx, "cb_write not defined", "DID", identifier);
                     nrc = UDS_NRC_ROOR;
                 }
-                else if (i_uds_session_check(ctx, &data_item->sec_write) != 0)
+                else if (i_uds_session_check(ctx, &data_item->sec_write) != UDS_NO_ERROR)
                 {
                     uds_debug(ctx, "DID cannot be written in active session", "DID", identifier);
                     nrc = UDS_NRC_ROOR;
                 }
-                else if (i_uds_security_check(ctx, &data_item->sec_write) != 0)
+                else if (i_uds_security_check(ctx, &data_item->sec_write) != UDS_NO_ERROR)
                 {
                     uds_debug(ctx, "DID cannot be written with current SA", "DID", identifier);
                     nrc = UDS_NRC_SAD;
                 }
                 else
                 {
-                    int ret;
+                    uds_err_e ret;
 
                     ret = data_item->cb_write(ctx->priv, identifier, &data[2], (data_len - 2U));
-                    if (ret != 0)
+                    if (ret != UDS_NO_ERROR)
                     {
                         uds_err(ctx, "failed to write", "DID", identifier);
                         nrc = UDS_NRC_GPF;
@@ -1658,7 +1686,7 @@ static uint8_t i_uds_svc_write_data_by_identifier(uds_context_t *ctx, const uds_
                     else
                     {
                         nrc = UDS_NRC_PR;
-                        i_uds_store_big_endian(&res_data[0], identifier, 2U);
+                        i_uds_store_uint16_big_endian(&res_data[0], identifier);
                         *res_data_len = 2U;
                     }
                 }
@@ -1676,7 +1704,7 @@ static uint8_t i_uds_svc_write_memory_by_address(uds_context_t *ctx, const uds_t
                                                  const uint8_t *data, size_t data_len,
                                                  uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -1686,8 +1714,8 @@ static uint8_t i_uds_svc_write_memory_by_address(uds_context_t *ctx, const uds_t
     }
     else
     {
-        size_t addr_len = UDS_LOW_NIBBLE(data[0]);
-        size_t size_len = UDS_HIGH_NIBBLE(data[0]);
+        size_t addr_len = ((size_t)data[0] & 0x0FU);
+        size_t size_len = (((size_t)data[0] >> 4U) & 0x0FU);
 
         size_t min_data_len = addr_len + size_len + 1U;
 
@@ -1704,26 +1732,16 @@ static uint8_t i_uds_svc_write_memory_by_address(uds_context_t *ctx, const uds_t
         {
             uintptr_t addr = 0U;
             size_t size = 0U;
-            int ret;
 
-            nrc = UDS_NRC_PR;
-
-            ret = i_uds_load_big_endian_addr(&data[1], addr_len, &addr);
-            if (ret != 0)
+            if (i_uds_load_big_endian_addr(&data[1], addr_len, &addr) != UDS_NO_ERROR)
             {
+                uds_debug(ctx, "requested memory write with invalid address", NULL, 0);
                 nrc = UDS_NRC_ROOR;
             }
-
-            ret = i_uds_load_big_endian_size(&data[1U + addr_len], size_len, &size);
-            if (ret != 0)
+            else if (i_uds_load_big_endian_size(&data[1U + addr_len], size_len, &size) != UDS_NO_ERROR)
             {
+                uds_debug(ctx, "requested memory write with invalid size", NULL, 0);
                 nrc = UDS_NRC_ROOR;
-            }
-
-            if (nrc != UDS_NRC_PR)
-            {
-                uds_debug(ctx, "requested memory write with invalid parameters", NULL, 0);
-                // Nothing to do, NRC is already set
             }
             else if ((min_data_len + size) > data_len)
             {
@@ -1732,7 +1750,7 @@ static uint8_t i_uds_svc_write_memory_by_address(uds_context_t *ctx, const uds_t
             }
             else
             {
-                unsigned long p;
+                uintptr_t p;
 
                 uds_debug(ctx, "request to write memory", "address", addr);
                 uds_debug(ctx, "request to write memory", "size", size);
@@ -1749,18 +1767,20 @@ static uint8_t i_uds_svc_write_memory_by_address(uds_context_t *ctx, const uds_t
                             uds_debug(ctx, "memory write size too large", NULL, 0);
                             nrc = UDS_NRC_ROOR;
                         }
-                        else if (i_uds_session_check(ctx, &mem_region->sec_write) != 0)
+                        else if (i_uds_session_check(ctx, &mem_region->sec_write) != UDS_NO_ERROR)
                         {
                             nrc = UDS_NRC_ROOR;
                         }
-                        else if (i_uds_security_check(ctx, &mem_region->sec_write) != 0)
+                        else if (i_uds_security_check(ctx, &mem_region->sec_write) != UDS_NO_ERROR)
                         {
                             nrc = UDS_NRC_SAD;
                         }
                         else
                         {
+                            uds_err_e ret;
+
                             ret = mem_region->cb_write(ctx->priv, addr, &data[min_data_len], size);
-                            if (ret != 0)
+                            if (ret != UDS_NO_ERROR)
                             {
                                 uds_err(ctx, "failed to write memory", "address", addr);
                                 nrc = UDS_NRC_GPF;
@@ -1794,7 +1814,7 @@ static uint8_t i_uds_svc_io_control_by_identifier(uds_context_t *ctx, const uds_
                                                   const uint8_t *data, size_t data_len,
                                                   uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -1804,9 +1824,9 @@ static uint8_t i_uds_svc_io_control_by_identifier(uds_context_t *ctx, const uds_
     }
     else
     {
-        uint16_t identifier = UDS_LOAD_UINT16_BIG_ENDIAN(&data[0]);
+        uint16_t identifier = i_uds_load_uint16_big_endian(&data[0]);
         uint8_t iocp = data[2];
-        unsigned long d;
+        uint16_t d;
 
         uds_debug(ctx, "requested IO control", "DID", identifier);
 
@@ -1820,7 +1840,7 @@ static uint8_t i_uds_svc_io_control_by_identifier(uds_context_t *ctx, const uds_
                     uds_info(ctx, "cb_io not defined", "DID", identifier);
                     nrc = UDS_NRC_ROOR;
                 }
-                else if (i_uds_session_check(ctx, &data_item->sec_io) != 0)
+                else if (i_uds_session_check(ctx, &data_item->sec_io) != UDS_NO_ERROR)
                 {
                     uds_debug(ctx, "IO control non supported in active session", "DID", identifier);
                     nrc = UDS_NRC_ROOR;
@@ -1831,7 +1851,7 @@ static uint8_t i_uds_svc_io_control_by_identifier(uds_context_t *ctx, const uds_
                     // controlState byte
                     nrc = UDS_NRC_IMLOIF;
                 }
-                else if (i_uds_security_check(ctx, &data_item->sec_write) != 0)
+                else if (i_uds_security_check(ctx, &data_item->sec_write) != UDS_NO_ERROR)
                 {
                     uds_debug(ctx, "I/O control not allowed with current SA", "DID", identifier);
                     nrc = UDS_NRC_SAD;
@@ -1841,49 +1861,63 @@ static uint8_t i_uds_svc_io_control_by_identifier(uds_context_t *ctx, const uds_
                     uint8_t *out_data = &res_data[3];
                     size_t out_data_len = *res_data_len - 3U;
                     const uint8_t *control_data = NULL;
-                    uds_iocp_e iocp_enum;
-                    int ret;
+                    size_t control_data_len = 0U;
+                    uds_iocp_e iocp_enum = UDS_IOCP_RETURN_CONTROL_TO_ECU;
+                    uds_err_e ret;
 
                     if (data_len > 3U)
                     {
                         control_data = &data[3];
+                        control_data_len = (data_len - 3U);
                     }
 
                     switch (iocp)
                     {
                     case UDS_IOCP_RCTECU:
                         iocp_enum = UDS_IOCP_RETURN_CONTROL_TO_ECU;
+                        nrc = UDS_NRC_PR;
                         break;
                     case UDS_IOCP_RTD:
                         iocp_enum = UDS_IOCP_RESET_TO_DEFAULT;
+                        nrc = UDS_NRC_PR;
                         break;
                     case UDS_IOCP_FCS:
                         iocp_enum = UDS_IOCP_FREEZE_CURRENT_STATE;
+                        nrc = UDS_NRC_PR;
                         break;
                     case UDS_IOCP_STA:
                         iocp_enum = UDS_IOCP_SHORT_TERM_ADJUSTMENT;
+                        nrc = UDS_NRC_PR;
                         break;
                     default:
-                        iocp_enum = iocp;
+                        nrc = UDS_NRC_ROOR;
                         break;
                     }
 
-                    ret = data_item->cb_io(ctx->priv, identifier, iocp_enum, control_data,
-                                           (data_len - 3U), out_data, &out_data_len);
-                    if (ret != 0)
+                    if (nrc != UDS_NRC_ROOR)
                     {
-                        uds_err(ctx, "failed to perform IO control", "DID", identifier);
-                        nrc = UDS_NRC_FPEORA;
-                    }
-                    else
-                    {
-                        nrc = UDS_NRC_PR;
-                        (void)memcpy(res_data, data, 3U);
-                        *res_data_len = out_data_len + 3U;
+                        ret = data_item->cb_io(ctx->priv, identifier, iocp_enum, control_data,
+                                               control_data_len, out_data, &out_data_len);
+                        if (ret != UDS_NO_ERROR)
+                        {
+                            uds_err(ctx, "failed to perform IO control", "DID", identifier);
+                            nrc = UDS_NRC_FPEORA;
+                        }
+                        else
+                        {
+                            nrc = UDS_NRC_PR;
+                            (void)memcpy(res_data, data, 3U);
+                            *res_data_len = out_data_len + 3U;
+                        }
                     }
                 }
                 break;
             }
+        }
+
+        if (d == ctx->config->num_data_items)
+        {
+            nrc = UDS_NRC_ROOR;
         }
     }
 
@@ -1897,7 +1931,7 @@ static uint8_t i_uds_svc_clear_diagnostic_information(uds_context_t *ctx,
                                                       const uint8_t *data, size_t data_len,
                                                       uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
     UDS_UNUSED(res_data);
@@ -1909,8 +1943,8 @@ static uint8_t i_uds_svc_clear_diagnostic_information(uds_context_t *ctx,
     }
     else
     {
-        uint32_t godtc = i_uds_load_big_endian(&data[0], 3U);
-        unsigned long d;
+        uint32_t godtc = i_uds_load_uint32_big_endian(&data[0], 3U);
+        uint32_t d;
 
         uds_debug(ctx, "requested clear of diagnostic data", "GODTC", godtc);
 
@@ -1920,7 +1954,7 @@ static uint8_t i_uds_svc_clear_diagnostic_information(uds_context_t *ctx,
             if ((godtc == group_of_dtc->first) ||
                 ((godtc >= group_of_dtc->first) && (godtc <= group_of_dtc->last)))
             {
-                if (i_uds_session_check(ctx, &group_of_dtc->sec) != 0)
+                if (i_uds_session_check(ctx, &group_of_dtc->sec) != UDS_NO_ERROR)
                 {
                     uds_debug(ctx, "cannot clear GODTC in active session", "GODTC", godtc);
                     nrc = UDS_NRC_ROOR;
@@ -1930,7 +1964,7 @@ static uint8_t i_uds_svc_clear_diagnostic_information(uds_context_t *ctx,
                     uds_info(ctx, "cb_clear not defined", "GODTC", godtc);
                     nrc = UDS_NRC_ROOR;
                 }
-                else if (group_of_dtc->cb_clear(ctx->priv, godtc) != 0)
+                else if (group_of_dtc->cb_clear(ctx->priv, godtc) != UDS_NO_ERROR)
                 {
                     uds_err(ctx, "failed to clear diagnostic data", "GODTC", godtc);
                     nrc = UDS_NRC_GPF;
@@ -1959,9 +1993,9 @@ static uint8_t i_uds_rdtci_report_number_of_dtc_by_status_mask(uds_context_t *ct
                                                                uint8_t *res_data,
                                                                size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
-    if (data_len < 1U)
+    if ((data_len < 1U) || (data == NULL))
     {
         nrc = UDS_NRC_IMLOIF;
     }
@@ -1974,17 +2008,17 @@ static uint8_t i_uds_rdtci_report_number_of_dtc_by_status_mask(uds_context_t *ct
     {
         uint8_t status_mask = data[0];
         uint16_t number_of_dtc = 0U;
-        unsigned long d;
+        uint32_t d;
 
         for (d = 0U; d < ctx->config->dtc_information.number_of_dtcs; d++)
         {
             uint32_t dtc_number = ctx->config->dtc_information.dtcs[d].dtc_number;
             uint8_t dtc_status_mask;
-            int ret;
+            uds_err_e ret;
 
             ret = ctx->config->dtc_information.cb_get_dtc_status_mask(ctx->priv, dtc_number,
                                                                       &dtc_status_mask);
-            if (ret != 0)
+            if (ret != UDS_ERR_GENERIC)
             {
                 uds_err(ctx, "failed to read status", "DTC", dtc_number);
             }
@@ -2000,8 +2034,8 @@ static uint8_t i_uds_rdtci_report_number_of_dtc_by_status_mask(uds_context_t *ct
 
         nrc = UDS_NRC_PR;
         res_data[0] = status_mask;
-        res_data[1] = ctx->config->dtc_information.format_identifier;
-        i_uds_store_big_endian(&res_data[2], number_of_dtc, 2U);
+        res_data[1] = (uint8_t)ctx->config->dtc_information.format_identifier;
+        i_uds_store_uint16_big_endian(&res_data[2], number_of_dtc);
         *res_data_len = 4;
     }
 
@@ -2014,9 +2048,9 @@ static uint8_t i_uds_rdtci_report_dtc_by_status_mask(uds_context_t *ctx, const u
                                                      size_t data_len, uint8_t *res_data,
                                                      size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
-    if (data_len < 1U)
+    if ((data_len < 1U) || (data == NULL))
     {
         nrc = UDS_NRC_IMLOIF;
     }
@@ -2030,17 +2064,17 @@ static uint8_t i_uds_rdtci_report_dtc_by_status_mask(uds_context_t *ctx, const u
         uint8_t status_mask = data[0];
         uint8_t *dtc_data = &res_data[1];
         size_t dtc_data_pos = 0;
-        unsigned int d;
+        uint32_t d;
 
         for (d = 0U; d < ctx->config->dtc_information.number_of_dtcs; d++)
         {
             uint32_t dtc_number = (ctx->config->dtc_information.dtcs[d].dtc_number & 0x00FFFFFFU);
             uint8_t dtc_status_mask;
-            int ret;
+            uds_err_e ret;
 
             ret = ctx->config->dtc_information.cb_get_dtc_status_mask(ctx->priv, dtc_number,
                                                                       &dtc_status_mask);
-            if (ret != 0)
+            if (ret != UDS_NO_ERROR)
             {
                 uds_err(ctx, "failed to read status", "DTC", dtc_number);
             }
@@ -2071,7 +2105,7 @@ static uint8_t i_uds_rdtci_report_dtc_snapshot_identification(uds_context_t *ctx
                                                               uint8_t *res_data,
                                                               size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(data);
     UDS_UNUSED(data_len);
@@ -2085,12 +2119,12 @@ static uint8_t i_uds_rdtci_report_dtc_snapshot_identification(uds_context_t *ctx
     {
         uint8_t *out_data = &res_data[0];
         size_t out_data_pos = 0U;
-        unsigned long d;
+        uint32_t d;
 
         for (d = 0; d < ctx->config->dtc_information.number_of_dtcs; d++)
         {
             uint32_t dtc_number = ctx->config->dtc_information.dtcs[d].dtc_number;
-            unsigned long r;
+            uint8_t r;
 
             for (r = 0U; r < 0xFFU; r++)
             {
@@ -2100,7 +2134,7 @@ static uint8_t i_uds_rdtci_report_dtc_snapshot_identification(uds_context_t *ctx
                 }
 
                 if (ctx->config->dtc_information.cb_is_dtc_snapshot_record_available(
-                        ctx->priv, dtc_number, r) != 0)
+                        ctx->priv, dtc_number, r) != UDS_NO_ERROR)
                 {
                     i_uds_store_big_endian(&out_data[out_data_pos], dtc_number, 3U);
                     out_data[out_data_pos + 3U] = r;
@@ -2122,9 +2156,9 @@ static uint8_t i_uds_rdtci_report_dtc_snapshot_record(uds_context_t *ctx, const 
                                                       size_t data_len, uint8_t *res_data,
                                                       size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
-    if (data_len < 4U)
+    if ((data_len < 4U) || (data == NULL))
     {
         nrc = UDS_NRC_IMLOIF;
     }
@@ -2140,11 +2174,11 @@ static uint8_t i_uds_rdtci_report_dtc_snapshot_record(uds_context_t *ctx, const 
     }
     else
     {
-        uint32_t dtc_number = i_uds_load_big_endian(&data[0], 3);
+        uint32_t dtc_number = i_uds_load_uint32_big_endian(&data[0], 3);
         uint8_t record_number = data[3];
-        uint8_t record_start = 0U;
-        uint8_t record_stop = 0U;
-        unsigned long d;
+        uint8_t record_start;
+        uint8_t record_stop;
+        uint32_t d;
 
         // Check if dtc_number is valid
         nrc = UDS_NRC_ROOR;
@@ -2170,11 +2204,11 @@ static uint8_t i_uds_rdtci_report_dtc_snapshot_record(uds_context_t *ctx, const 
         if (UDS_NRC_PR == nrc)
         {
             uint8_t dtc_status;
-            int ret;
+            uds_err_e ret;
 
             ret = ctx->config->dtc_information.cb_get_dtc_status_mask(ctx->priv, dtc_number,
                                                                       &dtc_status);
-            if (ret != 0)
+            if (ret != UDS_NO_ERROR)
             {
                 uds_err(ctx, "failed to read DTC status mask", "DTC", dtc_number);
                 nrc = UDS_NRC_GR;
@@ -2182,26 +2216,26 @@ static uint8_t i_uds_rdtci_report_dtc_snapshot_record(uds_context_t *ctx, const 
             else
             {
                 size_t used_data_len;
-                unsigned int r;
+                uint8_t r;
 
                 i_uds_store_big_endian(&res_data[0], dtc_number, 3U);
                 res_data[3] = dtc_status;
                 used_data_len = 4U;
 
-                for (r = record_start; r < record_stop; r++)
+                for (r = record_start; r <= record_stop; r++)
                 {
                     uint8_t *record_data = &res_data[used_data_len + 1U];
                     size_t record_data_len = used_data_len - 1U;
 
                     ret = ctx->config->dtc_information.cb_get_dtc_snapshot_record(
                         ctx->priv, dtc_number, r, record_data, &record_data_len);
-                    if ((ret != 0) && (record_start == record_stop))
+                    if ((ret != UDS_NO_ERROR) && (record_start == record_stop))
                     {
                         uds_err(ctx, "failed to read snapshot record", "index", r);
                         uds_err(ctx, "failed to read snapshot record", "DTC", dtc_number);
                         nrc = UDS_NRC_ROOR;
                     }
-                    else if ((ret == 0) && (record_data_len > 0U))
+                    else if ((ret == UDS_NO_ERROR) && (record_data_len > 0U))
                     {
                         res_data[used_data_len] = r;
                         used_data_len += (record_data_len + 1U);
@@ -2230,9 +2264,9 @@ static uint8_t i_uds_rdtci_report_dtc_stored_data(uds_context_t *ctx, const uint
                                                   size_t data_len, uint8_t *res_data,
                                                   size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
-    if (data_len < 1U)
+    if ((data_len < 1U) || (data == NULL))
     {
         nrc = UDS_NRC_IMLOIF;
     }
@@ -2244,10 +2278,10 @@ static uint8_t i_uds_rdtci_report_dtc_stored_data(uds_context_t *ctx, const uint
     else
     {
         uint8_t record_number = data[0];
-        uint8_t record_start = 0U;
-        uint8_t record_stop = 0U;
+        uint8_t record_start;
+        uint8_t record_stop;
         size_t used_data_len = 0U;
-        unsigned int r;
+        uint8_t r;
 
         if (0xFFU == record_number)
         {
@@ -2260,27 +2294,31 @@ static uint8_t i_uds_rdtci_report_dtc_stored_data(uds_context_t *ctx, const uint
             record_stop = record_number;
         }
 
-        for (r = record_start; r < record_stop; r++)
+        nrc = UDS_NRC_ROOR;
+
+        for (r = record_start; r <= record_stop; r++)
         {
             uint8_t *record_data = &res_data[used_data_len + 1U];
             size_t record_data_len = used_data_len - 1U;
-            int ret;
+            uds_err_e ret;
 
             ret = ctx->config->dtc_information.cb_get_stored_data_record(ctx->priv, r, record_data,
                                                                          &record_data_len);
-            if ((ret != 0) && (record_start == record_stop))
+            if ((ret != UDS_NO_ERROR) && (record_start == record_stop))
             {
                 uds_err(ctx, "failed to read stored data record", "record", r);
                 nrc = UDS_NRC_ROOR;
             }
-            else if ((ret == 0) && (record_data_len > 0U))
+            else if ((ret == UDS_NO_ERROR) && (record_data_len > 0U))
             {
                 res_data[used_data_len] = r;
                 used_data_len += (record_data_len + 1U);
+                nrc = UDS_NRC_PR;
             }
             else
             {
                 // Nothing to do
+                nrc = UDS_NRC_PR;
             }
 
             if (((used_data_len + 1U) >= *res_data_len) || (nrc != UDS_NRC_PR))
@@ -2300,15 +2338,15 @@ static uint8_t i_uds_rdtci_report_dtc_extended_data(uds_context_t *ctx, const ui
                                                     size_t data_len, uint8_t *res_data,
                                                     size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
-    if (data_len < 4U)
+    if ((data_len < 4U) || (data == NULL))
     {
         nrc = UDS_NRC_IMLOIF;
     }
-    else if (ctx->config->dtc_information.cb_get_dtc_extended_data_record == NULL)
+    else if (ctx->config->dtc_information.cb_get_dtc_ext_data_record == NULL)
     {
-        uds_debug(ctx, "cb_get_dtc_extended_data_record not defined", NULL, 0);
+        uds_debug(ctx, "cb_get_dtc_ext_data_record not defined", NULL, 0);
         nrc = UDS_NRC_SFNS;
     }
     else if (ctx->config->dtc_information.cb_get_dtc_status_mask == NULL)
@@ -2318,11 +2356,11 @@ static uint8_t i_uds_rdtci_report_dtc_extended_data(uds_context_t *ctx, const ui
     }
     else
     {
-        uint32_t dtc_number = i_uds_load_big_endian(&data[0], 3U);
+        uint32_t dtc_number = i_uds_load_uint32_big_endian(&data[0], 3U);
         uint8_t record_number = data[3];
         uint8_t record_start = 0U;
         uint8_t record_stop = 0U;
-        unsigned long d;
+        uint32_t d;
 
         // Check if dtc_number is valid
         nrc = UDS_NRC_ROOR;
@@ -2354,11 +2392,11 @@ static uint8_t i_uds_rdtci_report_dtc_extended_data(uds_context_t *ctx, const ui
         if (UDS_NRC_PR == nrc)
         {
             uint8_t dtc_status;
-            int ret;
+            uds_err_e ret;
 
             ret = ctx->config->dtc_information.cb_get_dtc_status_mask(ctx->priv, dtc_number,
                                                                       &dtc_status);
-            if (ret != 0)
+            if (ret != UDS_NO_ERROR)
             {
                 uds_err(ctx, "failed to read DTC status mask", "DTC", dtc_number);
                 nrc = UDS_NRC_GR;
@@ -2366,26 +2404,26 @@ static uint8_t i_uds_rdtci_report_dtc_extended_data(uds_context_t *ctx, const ui
             else
             {
                 size_t used_data_len;
-                unsigned int r;
+                uint8_t r;
 
                 i_uds_store_big_endian(&res_data[0], dtc_number, 3U);
                 res_data[3] = dtc_status;
 
                 used_data_len = 4U;
 
-                for (r = record_start; r < record_stop; r++)
+                for (r = record_start; r <= record_stop; r++)
                 {
                     uint8_t *record_data = &res_data[used_data_len + 1U];
                     size_t record_data_len = used_data_len - 1U;
-                    ret = ctx->config->dtc_information.cb_get_dtc_extended_data_record(
+                    ret = ctx->config->dtc_information.cb_get_dtc_ext_data_record(
                         ctx->priv, dtc_number, r, record_data, &record_data_len);
-                    if ((ret != 0) && (record_start == record_stop))
+                    if ((ret != UDS_NO_ERROR) && (record_start == record_stop))
                     {
                         uds_err(ctx, "failed to read extended data record", "index", r);
                         uds_err(ctx, "failed to read extended data record", "DTC", dtc_number);
                         nrc = UDS_NRC_ROOR;
                     }
-                    else if ((ret == 0) && (record_data_len > 0U))
+                    else if ((ret == UDS_NO_ERROR) && (record_data_len > 0U))
                     {
                         res_data[used_data_len] = r;
                         used_data_len += (record_data_len + 1U);
@@ -2414,7 +2452,7 @@ static uint8_t i_uds_svc_read_dtc_information(uds_context_t *ctx, const uds_time
                                               const uint8_t *data, size_t data_len,
                                               uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -2424,11 +2462,11 @@ static uint8_t i_uds_svc_read_dtc_information(uds_context_t *ctx, const uds_time
     }
     else
     {
-        uint8_t report_type = UDS_GET_SUBFUNCTION(data[0]);
+        uint8_t report_type = i_uds_get_subfunction(data[0]);
         size_t in_data_len = (data_len - 1U);
         const uint8_t *in_data = NULL;
-        uint8_t *out_data = NULL;
-        size_t out_data_len = 0U;
+        uint8_t *out_data;
+        size_t out_data_len;
 
         if (in_data_len > 0U)
         {
@@ -2556,7 +2594,7 @@ static uint8_t i_uds_svc_routine_control(uds_context_t *ctx, const uds_time_t *t
                                          const uint8_t *data, size_t data_len, uint8_t *res_data,
                                          size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -2566,16 +2604,18 @@ static uint8_t i_uds_svc_routine_control(uds_context_t *ctx, const uds_time_t *t
     }
     else
     {
-        uint8_t routine_control_type = UDS_GET_SUBFUNCTION(data[0]);
-        uint16_t identifier = UDS_LOAD_UINT16_BIG_ENDIAN(&data[1]);
+        uint8_t routine_control_type = i_uds_get_subfunction(data[0]);
+        uint16_t identifier = i_uds_load_uint16_big_endian(&data[1]);
         const uint8_t *control_data = NULL;
+        size_t control_data_len = 0U;
         uint8_t *out_data = NULL;
         size_t out_data_len = 0U;
-        unsigned long r;
+        uint16_t r;
 
         if (data_len > 3U)
         {
             control_data = &data[3];
+            control_data_len = (data_len - 3U);
         }
 
         if (*res_data_len > 3U)
@@ -2590,11 +2630,11 @@ static uint8_t i_uds_svc_routine_control(uds_context_t *ctx, const uds_time_t *t
             const uds_config_routine_t *routine = &ctx->config->routines[r];
             if (routine->identifier == identifier)
             {
-                if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_reset_hard) != 0)
+                if (i_uds_session_check(ctx, &ctx->config->ecureset.sec_reset_hard) != UDS_NO_ERROR)
                 {
                     nrc = UDS_NRC_SFNSIAS;
                 }
-                else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_reset_hard) != 0)
+                else if (i_uds_security_check(ctx, &ctx->config->ecureset.sec_reset_hard) != UDS_NO_ERROR)
                 {
                     nrc = UDS_NRC_SAD;
                 }
@@ -2604,17 +2644,25 @@ static uint8_t i_uds_svc_routine_control(uds_context_t *ctx, const uds_time_t *t
                     {
                         nrc = UDS_NRC_SFNS;
                     }
-                    else if (routine->cb_start(ctx->priv, identifier, control_data, (data_len - 3U),
-                                               out_data, &out_data_len) != 0)
+                    else if (routine->cb_start(ctx->priv, identifier, control_data, control_data_len,
+                                               out_data, &out_data_len) != UDS_NO_ERROR)
                     {
                         /* If start failed but routine is running, it means that
                          * it was already running and cannot be restarted */
-                        if ((routine->cb_is_running != NULL) &&
-                            (routine->cb_is_running(ctx->priv, identifier) != 0))
+                        if (routine->cb_is_running != NULL)
                         {
-                            uds_debug(ctx, "cb_start -> routine is already running", "routine",
-                                      identifier);
-                            nrc = UDS_NRC_RSE;
+                            if (routine->cb_is_running(ctx->priv, identifier) == UDS_ERR_BUSY)
+                            {
+                                uds_debug(ctx, "cb_start -> routine is already running", "routine",
+                                          identifier);
+                                nrc = UDS_NRC_RSE;
+                            }
+                            else
+                            {
+                                uds_err(ctx, "cb_start failed and not previously running", "routine",
+                                        identifier);
+                                nrc = UDS_NRC_GPF;
+                            }
                         }
                         else
                         {
@@ -2633,21 +2681,38 @@ static uint8_t i_uds_svc_routine_control(uds_context_t *ctx, const uds_time_t *t
                     {
                         nrc = UDS_NRC_SFNS;
                     }
-                    else if ((routine->cb_is_running != NULL) &&
-                             (routine->cb_is_running(ctx->priv, identifier) == 0))
+                    else if (routine->cb_is_running != NULL)
                     {
-                        uds_debug(ctx, "cb_stop -> routine is not running", "routine", identifier);
-                        nrc = UDS_NRC_RSE;
-                    }
-                    else if (routine->cb_stop(ctx->priv, identifier, control_data, (data_len - 3U),
-                                              out_data, &out_data_len) != 0)
-                    {
-                        uds_err(ctx, "cb_stop failed", "routine", identifier);
-                        nrc = UDS_NRC_GPF;
+                        if (routine->cb_is_running(ctx->priv, identifier) != UDS_ERR_BUSY)
+                        {
+                            uds_debug(ctx, "cb_stop -> routine is not running", "routine",
+                                      identifier);
+                            nrc = UDS_NRC_RSE;
+                        }
+                        else if (routine->cb_stop(ctx->priv, identifier, control_data, control_data_len,
+                                                  out_data, &out_data_len) != UDS_NO_ERROR)
+                        {
+                            uds_err(ctx, "cb_stop failed (and routine is running)", "routine",
+                                    identifier);
+                            nrc = UDS_NRC_GPF;
+                        }
+                        else
+                        {
+                            nrc = UDS_NRC_PR;
+                        }
                     }
                     else
                     {
-                        nrc = UDS_NRC_PR;
+                        if (routine->cb_stop(ctx->priv, identifier, control_data, control_data_len,
+                                             out_data, &out_data_len) != UDS_NO_ERROR)
+                        {
+                            uds_err(ctx, "cb_stop failed", "routine", identifier);
+                            nrc = UDS_NRC_GPF;
+                        }
+                        else
+                        {
+                            nrc = UDS_NRC_PR;
+                        }
                     }
                 }
                 else if (UDS_LEV_RCTP_RRR == routine_control_type)
@@ -2657,7 +2722,7 @@ static uint8_t i_uds_svc_routine_control(uds_context_t *ctx, const uds_time_t *t
                         nrc = UDS_NRC_SFNS;
                     }
                     else if (routine->cb_req_results(ctx->priv, identifier, out_data,
-                                                     &out_data_len) != 0)
+                                                     &out_data_len) != UDS_NO_ERROR)
                     {
                         uds_err(ctx, "cb_req_results failed", "routine", identifier);
                         nrc = UDS_NRC_RSE;
@@ -2692,7 +2757,7 @@ static uint8_t i_uds_svc_request_download(uds_context_t *ctx, const uds_time_t *
                                           const uint8_t *data, size_t data_len, uint8_t *res_data,
                                           size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -2702,11 +2767,11 @@ static uint8_t i_uds_svc_request_download(uds_context_t *ctx, const uds_time_t *
     }
     else
     {
-        uint8_t encrypting_method = UDS_LOW_NIBBLE(data[0]);
-        uint8_t compression_method = UDS_HIGH_NIBBLE(data[0]);
+        uint8_t encrypting_method = (data[0] & 0x0FU);
+        uint8_t compression_method = ((data[0] >> 4U) & 0x0FU);
 
-        size_t addr_len = UDS_LOW_NIBBLE(data[1]);
-        size_t size_len = UDS_HIGH_NIBBLE(data[1]);
+        size_t addr_len = ((size_t)data[1] & 0x0FU);
+        size_t size_len = (((size_t)data[1] >> 4U) & 0x0FU);
 
         if ((2U + addr_len + size_len) > data_len)
         {
@@ -2716,26 +2781,16 @@ static uint8_t i_uds_svc_request_download(uds_context_t *ctx, const uds_time_t *
         {
             uintptr_t addr = 0U;
             size_t size = 0U;
-            int ret;
 
-            nrc = UDS_NRC_PR;
-
-            ret = i_uds_load_big_endian_addr(&data[2], addr_len, &addr);
-            if (ret != 0)
+            if (i_uds_load_big_endian_addr(&data[2], addr_len, &addr) != UDS_NO_ERROR)
             {
+                uds_debug(ctx, "requested download with invalid address", NULL, 0);
                 nrc = UDS_NRC_ROOR;
             }
-
-            ret = i_uds_load_big_endian_size(&data[2U + addr_len], size_len, &size);
-            if (ret != 0)
+            else if (i_uds_load_big_endian_size(&data[2U + addr_len], size_len, &size) != UDS_NO_ERROR)
             {
+                uds_debug(ctx, "requested download with invalid size", NULL, 0);
                 nrc = UDS_NRC_ROOR;
-            }
-
-            if (nrc != UDS_NRC_PR)
-            {
-                uds_debug(ctx, "requested download with invalid parameters", NULL, 0);
-                // Nothing to do, NRC is already set
             }
             else if (size == 0U)
             {
@@ -2744,10 +2799,12 @@ static uint8_t i_uds_svc_request_download(uds_context_t *ctx, const uds_time_t *
             }
             else
             {
-                unsigned long p;
+                uintptr_t p;
 
                 uds_debug(ctx, "request to download", "address", addr);
                 uds_debug(ctx, "request to download", "size", size);
+
+                nrc = UDS_NRC_PR;
 
                 for (p = 0U; p < ctx->config->num_mem_regions; p++)
                 {
@@ -2761,11 +2818,11 @@ static uint8_t i_uds_svc_request_download(uds_context_t *ctx, const uds_time_t *
                             uds_debug(ctx, "download size too large", NULL, 0);
                             nrc = UDS_NRC_ROOR;
                         }
-                        else if (i_uds_session_check(ctx, &mem_region->sec_download) != 0)
+                        else if (i_uds_session_check(ctx, &mem_region->sec_download) != UDS_NO_ERROR)
                         {
                             nrc = UDS_NRC_ROOR;
                         }
-                        else if (i_uds_security_check(ctx, &mem_region->sec_download) != 0)
+                        else if (i_uds_security_check(ctx, &mem_region->sec_download) != UDS_NO_ERROR)
                         {
                             nrc = UDS_NRC_SAD;
                         }
@@ -2775,9 +2832,10 @@ static uint8_t i_uds_svc_request_download(uds_context_t *ctx, const uds_time_t *
                         }
                         else
                         {
+                            uds_err_e ret;
                             ret = mem_region->cb_download_request(
                                 ctx->priv, addr, size, compression_method, encrypting_method);
-                            if (ret != 0)
+                            if (ret != UDS_NO_ERROR)
                             {
                                 uds_err(ctx, "failed to request download", "address", addr);
                                 uds_err(ctx, "failed to request download", "size", size);
@@ -2785,15 +2843,15 @@ static uint8_t i_uds_svc_request_download(uds_context_t *ctx, const uds_time_t *
                             }
                             else
                             {
-                                /* The max_block_len length reflects the complete message
-                                 * length, including the service identifier and the
-                                 * data-parameters */
                                 size_len = sizeof(size_t);
                                 size_t max_block_len = mem_region->max_block_len;
 
-                                res_data[0] = UDS_FROM_NIBBLES(0U, size_len);
-                                i_uds_store_big_endian(&res_data[1], (max_block_len + 2U),
-                                                       size_len);
+                                /* The full_block_len length reflects the complete message length,
+                                 * including the service identifier and the data-parameters */
+                                size_t full_block_len = (max_block_len + 2U);
+
+                                res_data[0] = ((uint8_t)size_len << 4U);
+                                i_uds_store_big_endian(&res_data[1], full_block_len, size_len);
                                 *res_data_len = (1U + size_len);
                                 nrc = UDS_NRC_PR;
 
@@ -2827,7 +2885,7 @@ static uint8_t i_uds_svc_request_upload(uds_context_t *ctx, const uds_time_t *ti
                                         const uint8_t *data, size_t data_len, uint8_t *res_data,
                                         size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -2837,11 +2895,11 @@ static uint8_t i_uds_svc_request_upload(uds_context_t *ctx, const uds_time_t *ti
     }
     else
     {
-        uint8_t encrypting_method = UDS_LOW_NIBBLE(data[0]);
-        uint8_t compression_method = UDS_HIGH_NIBBLE(data[0]);
+        uint8_t encrypting_method = (data[0] & 0x0FU);
+        uint8_t compression_method = ((data[0] >> 4U) & 0x0FU);
 
-        size_t addr_len = UDS_LOW_NIBBLE(data[1]);
-        size_t size_len = UDS_HIGH_NIBBLE(data[1]);
+        size_t addr_len = ((size_t)data[1] & 0x0FU);
+        size_t size_len = (((size_t)data[1] >> 4U) & 0x0FU);
 
         if (data_len < (2U + addr_len + size_len))
         {
@@ -2851,26 +2909,16 @@ static uint8_t i_uds_svc_request_upload(uds_context_t *ctx, const uds_time_t *ti
         {
             uintptr_t addr = 0U;
             size_t size = 0U;
-            int ret;
 
-            nrc = UDS_NRC_PR;
-
-            ret = i_uds_load_big_endian_addr(&data[2], addr_len, &addr);
-            if (ret != 0)
+            if (i_uds_load_big_endian_addr(&data[2], addr_len, &addr) != UDS_NO_ERROR)
             {
+                uds_debug(ctx, "requested upload with invalid address", NULL, 0);
                 nrc = UDS_NRC_ROOR;
             }
-
-            ret = i_uds_load_big_endian_size(&data[2U + addr_len], size_len, &size);
-            if (ret != 0)
+            else if (i_uds_load_big_endian_size(&data[2U + addr_len], size_len, &size) != UDS_NO_ERROR)
             {
+                uds_debug(ctx, "requested upload with invalid size", NULL, 0);
                 nrc = UDS_NRC_ROOR;
-            }
-
-            if (nrc != UDS_NRC_PR)
-            {
-                uds_debug(ctx, "requested upload with invalid parameters", NULL, 0);
-                // Nothing to do, NRC is already set
             }
             else if (size == 0U)
             {
@@ -2879,7 +2927,7 @@ static uint8_t i_uds_svc_request_upload(uds_context_t *ctx, const uds_time_t *ti
             }
             else
             {
-                unsigned long p;
+                uintptr_t p;
 
                 uds_debug(ctx, "request to upload", "address", addr);
                 uds_debug(ctx, "request to upload", "size", size);
@@ -2895,11 +2943,11 @@ static uint8_t i_uds_svc_request_upload(uds_context_t *ctx, const uds_time_t *ti
                             uds_debug(ctx, "upload size too large", NULL, 0);
                             nrc = UDS_NRC_ROOR;
                         }
-                        else if (i_uds_session_check(ctx, &mem_region->sec_upload) != 0)
+                        else if (i_uds_session_check(ctx, &mem_region->sec_upload) != UDS_NO_ERROR)
                         {
                             nrc = UDS_NRC_ROOR;
                         }
-                        else if (i_uds_security_check(ctx, &mem_region->sec_upload) != 0)
+                        else if (i_uds_security_check(ctx, &mem_region->sec_upload) != UDS_NO_ERROR)
                         {
                             nrc = UDS_NRC_SAD;
                         }
@@ -2909,25 +2957,26 @@ static uint8_t i_uds_svc_request_upload(uds_context_t *ctx, const uds_time_t *ti
                         }
                         else
                         {
+                            uds_err_e ret;
                             ret = mem_region->cb_upload_request(
                                 ctx->priv, addr, size, compression_method, encrypting_method);
-                            if (ret != 0)
+                            if (ret != UDS_NO_ERROR)
                             {
                                 uds_err(ctx, "failed to request upload", "address", addr);
                                 nrc = UDS_NRC_UDNA;
                             }
                             else
                             {
-                                /* The max_block_size length reflects the complete message
-                                 * length, including the service identifier and the
-                                 * data-parameters */
-                                size_len = (uint8_t)sizeof(size_t);
+                                size_len = sizeof(size_t);
                                 size_t max_block_len = mem_region->max_block_len;
+                                
+                                /* The full_block_len length reflects the complete message length,
+                                 * including the service identifier and the data-parameters */
+                                size_t full_block_len = (max_block_len + 2U);
 
-                                res_data[0] = UDS_FROM_NIBBLES(0U, size_len);
-                                i_uds_store_big_endian(&res_data[1], (max_block_len + 2U),
-                                                       size_len);
-                                *res_data_len = (1U + (size_t)size_len);
+                                res_data[0] = ((uint8_t)size_len << 4U);
+                                i_uds_store_big_endian(&res_data[1], full_block_len, size_len);
+                                *res_data_len = (1U + size_len);
                                 nrc = UDS_NRC_PR;
 
                                 i_uds_data_transfer_reset(ctx);
@@ -2960,7 +3009,7 @@ static uint8_t i_uds_transmit_data_download(uds_context_t *ctx, uint8_t bsqc, co
                                             size_t data_len, uint8_t *res_data,
                                             size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     uds_debug(ctx, "data download", "bsqc", bsqc);
 
@@ -2970,7 +3019,7 @@ static uint8_t i_uds_transmit_data_download(uds_context_t *ctx, uint8_t bsqc, co
     }
     else if (bsqc == ctx->data_transfer.bsqc)
     {
-        int ret;
+        uds_err_e ret;
 
         switch (ctx->data_transfer.direction)
         {
@@ -2987,11 +3036,11 @@ static uint8_t i_uds_transmit_data_download(uds_context_t *ctx, uint8_t bsqc, co
 
         default:
             uds_err(ctx, "invalid data transfer direction", NULL, 0);
-            ret = -1;
+            ret = UDS_ERR_GENERIC;
             break;
         }
 
-        if (ret != 0)
+        if (ret != UDS_NO_ERROR)
         {
             uds_err(ctx, "download failed", "bsqc", bsqc);
             uds_debug(ctx, "download failed", "address", ctx->data_transfer.address);
@@ -3031,9 +3080,9 @@ static uint8_t i_uds_transmit_data_download(uds_context_t *ctx, uint8_t bsqc, co
 static uint8_t i_uds_transmit_data_upload(uds_context_t *ctx, uint8_t bsqc, uint8_t *res_data,
                                           size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
     size_t read_data = ctx->data_transfer.max_block_len;
-    int ret;
+    uds_err_e ret;
 
     if (*res_data_len == 0U)
     {
@@ -3060,11 +3109,11 @@ static uint8_t i_uds_transmit_data_upload(uds_context_t *ctx, uint8_t bsqc, uint
 
         default:
             uds_err(ctx, "invalid data transfer direction", NULL, 0);
-            ret = -1;
+            ret = UDS_ERR_GENERIC;
             break;
         }
 
-        if (ret != 0)
+        if (ret != UDS_NO_ERROR)
         {
             uds_err(ctx, "upload failed", "bsqc", bsqc);
             nrc = UDS_NRC_GPF;
@@ -3084,7 +3133,7 @@ static uint8_t i_uds_transmit_data_upload(uds_context_t *ctx, uint8_t bsqc, uint
     {
         ret = ctx->data_transfer.mem_region->cb_upload(ctx->priv, ctx->data_transfer.prev_address,
                                                        &res_data[1], &read_data);
-        if (ret != 0)
+        if (ret != UDS_NO_ERROR)
         {
             uds_err(ctx, "re-upload failed", "bsqc", bsqc);
             nrc = UDS_NRC_GPF;
@@ -3112,7 +3161,7 @@ static uint8_t i_uds_svc_transmit_data(uds_context_t *ctx, const uds_time_t *tim
                                        const uint8_t *data, size_t data_len, uint8_t *res_data,
                                        size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -3160,8 +3209,8 @@ static uint8_t i_uds_svc_request_transfer_exit(uds_context_t *ctx, const uds_tim
                                                const uint8_t *data, size_t data_len,
                                                uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
-    int ret;
+    uint8_t nrc;
+    uds_err_e ret;
 
     UDS_UNUSED(timestamp);
     UDS_UNUSED(data);
@@ -3177,7 +3226,7 @@ static uint8_t i_uds_svc_request_transfer_exit(uds_context_t *ctx, const uds_tim
         if (ctx->data_transfer.mem_region->cb_download_exit != NULL)
         {
             ret = ctx->data_transfer.mem_region->cb_download_exit(ctx->priv);
-            if (ret != 0)
+            if (ret != UDS_NO_ERROR)
             {
                 uds_err(ctx, "download exit failed", NULL, 0);
                 nrc = UDS_NRC_GPF;
@@ -3191,7 +3240,7 @@ static uint8_t i_uds_svc_request_transfer_exit(uds_context_t *ctx, const uds_tim
         if (ctx->data_transfer.mem_region->cb_upload_exit != NULL)
         {
             ret = ctx->data_transfer.mem_region->cb_upload_exit(ctx->priv);
-            if (ret != 0)
+            if (ret != UDS_NO_ERROR)
             {
                 uds_err(ctx, "upload exit failed", NULL, 0);
                 nrc = UDS_NRC_GPF;
@@ -3210,7 +3259,7 @@ static uint8_t i_uds_svc_request_transfer_exit(uds_context_t *ctx, const uds_tim
         {
             ret = ctx->config->file_transfer.cb_close(ctx->priv, ctx->data_transfer.file_mode,
                                                       ctx->data_transfer.fd);
-            if (ret != 0)
+            if (ret != UDS_NO_ERROR)
             {
                 uds_err(ctx, "file close failed", NULL, 0);
                 nrc = UDS_NRC_GPF;
@@ -3231,7 +3280,7 @@ static uint8_t i_uds_svc_request_transfer_exit(uds_context_t *ctx, const uds_tim
 static uint8_t i_uds_file_transfer_addfile(uds_context_t *ctx, const uint8_t *data, size_t data_len,
                                            uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_SFNS;
+    uint8_t nrc;
 
     if ((ctx->config->file_transfer.cb_open == NULL) ||
         (ctx->config->file_transfer.cb_write == NULL))
@@ -3245,7 +3294,7 @@ static uint8_t i_uds_file_transfer_addfile(uds_context_t *ctx, const uint8_t *da
     }
     else
     {
-        size_t file_path_len = UDS_LOAD_UINT16_BIG_ENDIAN(&data[1]);
+        size_t file_path_len = i_uds_load_uint16_big_endian(&data[1]);
         if (data_len < (5U + file_path_len))
         {
             nrc = UDS_NRC_IMLOIF;
@@ -3261,64 +3310,76 @@ static uint8_t i_uds_file_transfer_addfile(uds_context_t *ctx, const uint8_t *da
             {
                 nrc = UDS_NRC_IMLOIF;
             }
-            else if (filesize_param_len > sizeof(size_t))
-            {
-                nrc = UDS_NRC_ROOR;
-            }
             else
             {
                 intptr_t file_fd = -1;
-                int ret = -1;
+                uds_err_e ret = UDS_ERR_GENERIC;
 
                 /* NOTE: file_path might not be zero-terminated */
                 const char *file_path = (const char *)&data[3];
                 uint8_t data_format_identifier = data[3U + file_path_len];
 
-                uint8_t compression_method = UDS_HIGH_NIBBLE(data_format_identifier);
-                uint8_t encrypting_method = UDS_LOW_NIBBLE(data_format_identifier);
+                uint8_t compression_method = ((data_format_identifier >> 4U) & 0x0FU);
+                uint8_t encrypting_method = (data_format_identifier & 0x0FU);
 
                 /* Extract sizes from incoming data */
-                size_t filesize_uncompressed =
-                    i_uds_load_big_endian(&data[4U + file_path_len], filesize_param_len);
+                size_t filesize_uncompressed = 0;
+                size_t filesize_compressed = 0;
 
-                size_t filesize_compressed = i_uds_load_big_endian(
-                    &data[4U + file_path_len + filesize_param_len], filesize_param_len);
-
-                uds_debug(ctx, "add file", "size (uncompressed)", filesize_uncompressed);
-                uds_debug(ctx, "add file", "size (compressed)", filesize_compressed);
-                uds_debug(ctx, "add file", "compression method", compression_method);
-                uds_debug(ctx, "add file", "encrypting method", encrypting_method);
-
-                ret = ctx->config->file_transfer.cb_open(
-                    ctx->priv, file_path, file_path_len, UDS_FILE_MODE_WRITE_CREATE, &file_fd,
-                    &filesize_uncompressed, &filesize_compressed, compression_method,
-                    encrypting_method);
-                if (ret < 0)
+                if (i_uds_load_big_endian_size(&data[4U + file_path_len],
+                                               filesize_param_len, &filesize_uncompressed) != UDS_NO_ERROR)
                 {
-                    uds_err(ctx, "failed to open file for writing", NULL, 0);
-                    nrc = UDS_NRC_UDNA;
+                    uds_err(ctx, "failed to load uncompressed size",
+                            "filesize_param_len", filesize_param_len);
+                    nrc = UDS_NRC_ROOR;
+                }
+                else if (i_uds_load_big_endian_size(&data[4U + file_path_len + filesize_param_len],
+                                                    filesize_param_len, &filesize_compressed) != UDS_NO_ERROR)
+                {
+                    uds_err(ctx, "failed to load compressed size",
+                            "filesize_param_len", filesize_param_len);
+                    nrc = UDS_NRC_ROOR;
                 }
                 else
                 {
-                    const size_t size_len = sizeof(size_t);
-                    size_t max_block_len = ctx->config->file_transfer.max_block_len;
+                    uds_debug(ctx, "add file", "size (uncompressed)", filesize_uncompressed);
+                    uds_debug(ctx, "add file", "size (compressed)", filesize_compressed);
+                    uds_debug(ctx, "add file", "compression method", compression_method);
+                    uds_debug(ctx, "add file", "encrypting method", encrypting_method);
 
-                    res_data[0] = data[0];
-                    /* The max_block_len length reflects the complete message length,
-                     * including the service identifier and the data-parameters */
-                    res_data[1] = (size_len & 0xFFU);
-                    i_uds_store_big_endian(&res_data[2], (max_block_len + 2U), size_len);
-                    res_data[2U + size_len] = data_format_identifier;
-                    *res_data_len = (3U + size_len);
-                    nrc = UDS_NRC_PR;
+                    ret = ctx->config->file_transfer.cb_open(
+                        ctx->priv, file_path, file_path_len, UDS_FILE_MODE_WRITE_CREATE, &file_fd,
+                        &filesize_uncompressed, &filesize_compressed, compression_method,
+                        encrypting_method);
+                    if (ret != UDS_NO_ERROR)
+                    {
+                        uds_err(ctx, "failed to open file for writing", NULL, 0);
+                        nrc = UDS_NRC_UDNA;
+                    }
+                    else
+                    {
+                        const size_t size_len = sizeof(size_t);
+                        size_t max_block_len = ctx->config->file_transfer.max_block_len;
 
-                    i_uds_data_transfer_reset(ctx);
-                    ctx->data_transfer.direction = UDS_DATA_TRANSFER_DOWNLOAD_FILE;
-                    ctx->data_transfer.file_mode = UDS_FILE_MODE_WRITE_CREATE;
-                    ctx->data_transfer.fd = file_fd;
-                    /* Block sequence counter starts from 1 */
-                    ctx->data_transfer.bsqc = 0x01U;
-                    ctx->data_transfer.max_block_len = max_block_len;
+                        /* The full_block_len length reflects the complete message length,
+                         * including the service identifier and the data-parameters */
+                        size_t full_block_len = (max_block_len + 2U);
+
+                        res_data[0] = data[0];
+                        res_data[1] = (uint8_t)size_len;
+                        i_uds_store_big_endian(&res_data[2], full_block_len, size_len);
+                        res_data[2U + size_len] = data_format_identifier;
+                        *res_data_len = (3U + size_len);
+                        nrc = UDS_NRC_PR;
+
+                        i_uds_data_transfer_reset(ctx);
+                        ctx->data_transfer.direction = UDS_DATA_TRANSFER_DOWNLOAD_FILE;
+                        ctx->data_transfer.file_mode = UDS_FILE_MODE_WRITE_CREATE;
+                        ctx->data_transfer.fd = file_fd;
+                        /* Block sequence counter starts from 1 */
+                        ctx->data_transfer.bsqc = 0x01U;
+                        ctx->data_transfer.max_block_len = max_block_len;
+                    }
                 }
             }
         }
@@ -3332,7 +3393,7 @@ static uint8_t i_uds_file_transfer_addfile(uds_context_t *ctx, const uint8_t *da
 static uint8_t i_uds_file_transfer_delfile(uds_context_t *ctx, const uint8_t *data, size_t data_len,
                                            uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_SFNS;
+    uint8_t nrc;
 
     if (ctx->config->file_transfer.cb_delete == NULL)
     {
@@ -3345,7 +3406,7 @@ static uint8_t i_uds_file_transfer_delfile(uds_context_t *ctx, const uint8_t *da
     }
     else
     {
-        size_t file_path_len = UDS_LOAD_UINT16_BIG_ENDIAN(&data[1]);
+        size_t file_path_len = i_uds_load_uint16_big_endian(&data[1]);
         if (data_len < (5U + file_path_len))
         {
             nrc = UDS_NRC_IMLOIF;
@@ -3356,7 +3417,7 @@ static uint8_t i_uds_file_transfer_delfile(uds_context_t *ctx, const uint8_t *da
         }
         else
         {
-            int ret;
+            uds_err_e ret;
 
             /* NOTE: file_path might not be zero-terminated */
             const char *file_path = (const char *)&data[3];
@@ -3364,7 +3425,7 @@ static uint8_t i_uds_file_transfer_delfile(uds_context_t *ctx, const uint8_t *da
             uds_debug(ctx, "delete file", NULL, 0);
 
             ret = ctx->config->file_transfer.cb_delete(ctx->priv, file_path, file_path_len);
-            if (ret < 0)
+            if (ret != UDS_NO_ERROR)
             {
                 uds_err(ctx, "failed to delete file", NULL, 0);
                 nrc = UDS_NRC_UDNA;
@@ -3387,7 +3448,7 @@ static uint8_t i_uds_file_transfer_replfile(uds_context_t *ctx, const uint8_t *d
                                             size_t data_len, uint8_t *res_data,
                                             size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_SFNS;
+    uint8_t nrc;
 
     if ((ctx->config->file_transfer.cb_open == NULL) ||
         (ctx->config->file_transfer.cb_write == NULL))
@@ -3401,7 +3462,7 @@ static uint8_t i_uds_file_transfer_replfile(uds_context_t *ctx, const uint8_t *d
     }
     else
     {
-        size_t file_path_len = UDS_LOAD_UINT16_BIG_ENDIAN(&data[1]);
+        size_t file_path_len = i_uds_load_uint16_big_endian(&data[1]);
         if (data_len < (5U + file_path_len))
         {
             nrc = UDS_NRC_IMLOIF;
@@ -3424,57 +3485,75 @@ static uint8_t i_uds_file_transfer_replfile(uds_context_t *ctx, const uint8_t *d
             else
             {
                 intptr_t file_fd = -1;
-                int ret = -1;
+                uds_err_e ret = UDS_ERR_GENERIC;
 
                 /* NOTE: file_path might not be zero-terminated */
                 const char *file_path = (const char *)&data[3];
                 uint8_t data_format_identifier = data[3U + file_path_len];
 
-                uint8_t compression_method = UDS_HIGH_NIBBLE(data_format_identifier);
-                uint8_t encrypting_method = UDS_LOW_NIBBLE(data_format_identifier);
+                uint8_t compression_method = ((data_format_identifier >> 4U) & 0x0FU);
+                uint8_t encrypting_method = (data_format_identifier & 0x0FU);
 
                 /* Extract sizes from incoming data */
-                size_t filesize_uncompressed =
-                    i_uds_load_big_endian(&data[5U + file_path_len], filesize_param_len);
+                size_t filesize_uncompressed = 0;
+                size_t filesize_compressed = 0;
 
-                size_t filesize_compressed = i_uds_load_big_endian(
-                    &data[5U + file_path_len + filesize_param_len], filesize_param_len);
-
-                uds_debug(ctx, "replace file", "size (uncompressed)", filesize_uncompressed);
-                uds_debug(ctx, "replace file", "size (compressed)", filesize_compressed);
-                uds_debug(ctx, "replace file", "compression method", compression_method);
-                uds_debug(ctx, "replace file", "encrypting method", encrypting_method);
-
-                ret = ctx->config->file_transfer.cb_open(
-                    ctx->priv, file_path, file_path_len, UDS_FILE_MODE_WRITE_REPLACE, &file_fd,
-                    &filesize_uncompressed, &filesize_compressed, compression_method,
-                    encrypting_method);
-                if (ret < 0)
+                if (i_uds_load_big_endian_size(&data[5U + file_path_len],
+                                               filesize_param_len, &filesize_uncompressed) != UDS_NO_ERROR)
                 {
-                    uds_err(ctx, "failed to open file for writing", NULL, 0);
-                    nrc = UDS_NRC_UDNA;
+                    uds_err(ctx, "failed to load uncompressed size",
+                            "filesize_param_len", filesize_param_len);
+                    nrc = UDS_NRC_ROOR;
                 }
+                else if (i_uds_load_big_endian_size(&data[5U + file_path_len + filesize_param_len],
+                                                    filesize_param_len, &filesize_compressed) != UDS_NO_ERROR)
+                {
+                    uds_err(ctx, "failed to load compressed size",
+                            "filesize_param_len", filesize_param_len);
+                    nrc = UDS_NRC_ROOR;
+                }
+
                 else
                 {
-                    const size_t size_len = sizeof(size_t);
-                    size_t max_block_len = ctx->config->file_transfer.max_block_len;
+                    uds_debug(ctx, "replace file", "size (uncompressed)", filesize_uncompressed);
+                    uds_debug(ctx, "replace file", "size (compressed)", filesize_compressed);
+                    uds_debug(ctx, "replace file", "compression method", compression_method);
+                    uds_debug(ctx, "replace file", "encrypting method", encrypting_method);
 
-                    res_data[0] = data[0];
-                    /* The max_block_len length reflects the complete message length,
-                     * including the service identifier and the data-parameters */
-                    res_data[1] = (uint8_t)(size_len & 0xFFU);
-                    i_uds_store_big_endian(&res_data[2], (max_block_len + 2U), size_len);
-                    res_data[2U + size_len] = data_format_identifier;
-                    *res_data_len = (3U + size_len);
-                    nrc = UDS_NRC_PR;
+                    ret = ctx->config->file_transfer.cb_open(
+                        ctx->priv, file_path, file_path_len, UDS_FILE_MODE_WRITE_REPLACE, &file_fd,
+                        &filesize_uncompressed, &filesize_compressed, compression_method,
+                        encrypting_method);
 
-                    i_uds_data_transfer_reset(ctx);
-                    ctx->data_transfer.direction = UDS_DATA_TRANSFER_DOWNLOAD_FILE;
-                    ctx->data_transfer.file_mode = UDS_FILE_MODE_WRITE_REPLACE;
-                    ctx->data_transfer.fd = file_fd;
-                    /* Block sequence counter starts from 1 */
-                    ctx->data_transfer.bsqc = 0x01U;
-                    ctx->data_transfer.max_block_len = max_block_len;
+                    if (ret != UDS_NO_ERROR)
+                    {
+                        uds_err(ctx, "failed to open file for writing", NULL, 0);
+                        nrc = UDS_NRC_UDNA;
+                    }
+                    else
+                    {
+                        const size_t size_len = sizeof(size_t);
+                        size_t max_block_len = ctx->config->file_transfer.max_block_len;
+
+                        /* The full_block_len length reflects the complete message length,
+                         * including the service identifier and the data-parameters */
+                        size_t full_block_len = (max_block_len + 2U);
+
+                        res_data[0] = data[0];
+                        res_data[1] = (uint8_t)(size_len & 0xFFU);
+                        i_uds_store_big_endian(&res_data[2], full_block_len, size_len);
+                        res_data[2U + size_len] = data_format_identifier;
+                        *res_data_len = (3U + size_len);
+                        nrc = UDS_NRC_PR;
+
+                        i_uds_data_transfer_reset(ctx);
+                        ctx->data_transfer.direction = UDS_DATA_TRANSFER_DOWNLOAD_FILE;
+                        ctx->data_transfer.file_mode = UDS_FILE_MODE_WRITE_REPLACE;
+                        ctx->data_transfer.fd = file_fd;
+                        /* Block sequence counter starts from 1 */
+                        ctx->data_transfer.bsqc = 0x01U;
+                        ctx->data_transfer.max_block_len = max_block_len;
+                    }
                 }
             }
         }
@@ -3488,7 +3567,7 @@ static uint8_t i_uds_file_transfer_replfile(uds_context_t *ctx, const uint8_t *d
 static uint8_t i_uds_file_transfer_rdfile(uds_context_t *ctx, const uint8_t *data, size_t data_len,
                                           uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_SFNS;
+    uint8_t nrc;
 
     if ((ctx->config->file_transfer.cb_open == NULL) ||
         (ctx->config->file_transfer.cb_read == NULL))
@@ -3502,7 +3581,7 @@ static uint8_t i_uds_file_transfer_rdfile(uds_context_t *ctx, const uint8_t *dat
     }
     else
     {
-        size_t file_path_len = UDS_LOAD_UINT16_BIG_ENDIAN(&data[1]);
+        size_t file_path_len = i_uds_load_uint16_big_endian(&data[1]);
         if (data_len < (4U + file_path_len))
         {
             nrc = UDS_NRC_IMLOIF;
@@ -3516,20 +3595,20 @@ static uint8_t i_uds_file_transfer_rdfile(uds_context_t *ctx, const uint8_t *dat
             intptr_t file_fd = -1;
             size_t filesize_uncompressed = 0U;
             size_t filesize_compressed = 0U;
-            int ret = -1;
+            uds_err_e ret;
 
             /* NOTE: file_path might not be zero-terminated */
             const char *file_path = (const char *)&data[3];
             uint8_t data_format_identifier = data[3U + file_path_len];
 
-            uint8_t compression_method = UDS_HIGH_NIBBLE(data_format_identifier);
-            uint8_t encrypting_method = UDS_LOW_NIBBLE(data_format_identifier);
+            uint8_t compression_method = ((data_format_identifier >> 4U) & 0x0FU);
+            uint8_t encrypting_method = (data_format_identifier & 0x0FU);
 
             ret = ctx->config->file_transfer.cb_open(ctx->priv, file_path, file_path_len,
                                                      UDS_FILE_MODE_READ, &file_fd,
                                                      &filesize_uncompressed, &filesize_compressed,
                                                      compression_method, encrypting_method);
-            if (ret < 0)
+            if (ret != UDS_NO_ERROR)
             {
                 uds_err(ctx, "failed to open file for reading", NULL, 0);
                 nrc = UDS_NRC_UDNA;
@@ -3539,18 +3618,20 @@ static uint8_t i_uds_file_transfer_rdfile(uds_context_t *ctx, const uint8_t *dat
                 const size_t size_len = sizeof(size_t);
                 size_t max_block_len = ctx->config->file_transfer.max_block_len;
 
+                /* The max_block_len length reflects the complete message length,
+                 * including the service identifier and the data-parameters */
+                size_t full_block_len = (max_block_len + 2U);
+
                 uds_debug(ctx, "read file", "size (uncompressed)", filesize_uncompressed);
                 uds_debug(ctx, "read file", "size (compressed)", filesize_compressed);
                 uds_debug(ctx, "read file", "compression method", compression_method);
                 uds_debug(ctx, "read file", "encrypting method", encrypting_method);
 
                 res_data[0] = data[0];
-                /* The max_block_len length reflects the complete message length,
-                 * including the service identifier and the data-parameters */
                 res_data[1] = (uint8_t)(size_len & 0xFFU);
-                i_uds_store_big_endian(&res_data[2], (max_block_len + 2U), size_len);
+                i_uds_store_big_endian(&res_data[2], full_block_len, size_len);
                 res_data[2U + size_len] = data_format_identifier;
-                i_uds_store_big_endian(&res_data[3U + size_len], size_len, 2);
+                i_uds_store_uint16_big_endian(&res_data[3U + size_len], (uint16_t)size_len);
                 i_uds_store_big_endian(&res_data[5U + size_len], filesize_uncompressed, size_len);
                 i_uds_store_big_endian(&res_data[5U + (2U * size_len)], filesize_compressed,
                                        size_len);
@@ -3576,7 +3657,7 @@ static uint8_t i_uds_file_transfer_rdfile(uds_context_t *ctx, const uint8_t *dat
 static uint8_t i_uds_file_transfer_rddir(uds_context_t *ctx, const uint8_t *data, size_t data_len,
                                          uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_SFNS;
+    uint8_t nrc;
 
     if ((ctx->config->file_transfer.cb_open == NULL) ||
         (ctx->config->file_transfer.cb_read == NULL))
@@ -3590,7 +3671,7 @@ static uint8_t i_uds_file_transfer_rddir(uds_context_t *ctx, const uint8_t *data
     }
     else
     {
-        size_t dir_path_len = UDS_LOAD_UINT16_BIG_ENDIAN(&data[1]);
+        size_t dir_path_len = i_uds_load_uint16_big_endian(&data[1]);
         if (data_len < (3U + dir_path_len))
         {
             nrc = UDS_NRC_IMLOIF;
@@ -3603,7 +3684,7 @@ static uint8_t i_uds_file_transfer_rddir(uds_context_t *ctx, const uint8_t *data
         {
             intptr_t dir_fd = -1;
             size_t dir_info_len = 0U;
-            int ret = -1;
+            uds_err_e ret;
 
             /* NOTE: dir_path might not be zero-terminated */
             const char *dir_path = (const char *)&data[3];
@@ -3613,7 +3694,7 @@ static uint8_t i_uds_file_transfer_rddir(uds_context_t *ctx, const uint8_t *data
             ret = ctx->config->file_transfer.cb_open(ctx->priv, dir_path, dir_path_len,
                                                      UDS_FILE_MODE_LIST_DIR, &dir_fd, &dir_info_len,
                                                      NULL, 0, 0);
-            if (ret < 0)
+            if (ret != UDS_NO_ERROR)
             {
                 uds_err(ctx, "failed to read dir", NULL, 0);
                 nrc = UDS_NRC_UDNA;
@@ -3624,13 +3705,15 @@ static uint8_t i_uds_file_transfer_rddir(uds_context_t *ctx, const uint8_t *data
 
                 size_t max_block_len = ctx->config->file_transfer.max_block_len;
 
-                res_data[0] = data[0];
-                /* The max_block_len length reflects the complete message length,
+                /* The full_block_len length reflects the complete message length,
                  * including the service identifier and the data-parameters */
+                size_t full_block_len = (max_block_len + 2U);
+
+                res_data[0] = data[0];
                 res_data[1] = (uint8_t)(size_len & 0xFFU);
-                i_uds_store_big_endian(&res_data[2], (max_block_len + 2U), size_len);
+                i_uds_store_big_endian(&res_data[2], full_block_len, size_len);
                 res_data[2U + size_len] = 0x00U;
-                i_uds_store_big_endian(&res_data[3U + size_len], size_len, 2U);
+                i_uds_store_uint16_big_endian(&res_data[3U + size_len], (uint16_t)size_len);
                 i_uds_store_big_endian(&res_data[5U + size_len], dir_info_len, size_len);
                 *res_data_len = (5U + (2U * size_len));
                 nrc = UDS_NRC_PR;
@@ -3655,7 +3738,7 @@ static uint8_t i_uds_svc_request_file_transfer(uds_context_t *ctx, const uds_tim
                                                const uint8_t *data, size_t data_len,
                                                uint8_t *res_data, size_t *res_data_len)
 {
-    uint8_t nrc = UDS_NRC_GR;
+    uint8_t nrc;
 
     UDS_UNUSED(timestamp);
 
@@ -3695,14 +3778,14 @@ static uint8_t i_uds_svc_request_file_transfer(uds_context_t *ctx, const uds_tim
     return nrc;
 }
 
-static int i_uds_process_service(uds_context_t *ctx, const uds_time_t *timestamp,
-                                 const uint8_t service, const uint8_t *data, size_t data_len,
-                                 const uds_address_e addr_type)
+static uds_err_e i_uds_process_service(uds_context_t *ctx, const uds_time_t *timestamp,
+                                       const uint8_t service, const uint8_t *data, size_t data_len,
+                                       const uds_address_e addr_type)
 {
     uint8_t *res_data = &ctx->response_buffer[1];
     size_t res_data_len = (ctx->response_buffer_len - 1U);
-    uint8_t nrc = UDS_NRC_SNS;
-    int ret = 0;
+    uint8_t nrc;
+    uds_err_e ret = UDS_NO_ERROR;
 
     uds_debug(ctx, "process service", "service", service);
 
@@ -3736,6 +3819,7 @@ static int i_uds_process_service(uds_context_t *ctx, const uds_time_t *timestamp
         break;
 
     case UDS_SVC_SDT:
+        nrc = UDS_NRC_SNS;
         break;
 
     case UDS_SVC_CDTCS:
@@ -3744,6 +3828,7 @@ static int i_uds_process_service(uds_context_t *ctx, const uds_time_t *timestamp
         break;
 
     case UDS_SVC_ROE:
+        nrc = UDS_NRC_SNS;
         break;
 
     case UDS_SVC_LC:
@@ -3767,9 +3852,11 @@ static int i_uds_process_service(uds_context_t *ctx, const uds_time_t *timestamp
         break;
 
     case UDS_SVC_RDBPI:
+        nrc = UDS_NRC_SNS;
         break;
 
     case UDS_SVC_DDDI:
+        nrc = UDS_NRC_SNS;
         break;
 
     case UDS_SVC_WDBI:
@@ -3829,10 +3916,11 @@ static int i_uds_process_service(uds_context_t *ctx, const uds_time_t *timestamp
 
     default:
         uds_warning(ctx, "service not supported", "service", service);
+        nrc = UDS_NRC_SNS;
         break;
     }
 
-    if (UDS_NRC_PR == nrc)
+    if (nrc == UDS_NRC_PR)
     {
         ctx->response_buffer[0] = (service + UDS_PRINB);
         uds_debug(ctx, "send positive response", "service", service);
@@ -3868,10 +3956,11 @@ static int i_uds_process_service(uds_context_t *ctx, const uds_time_t *timestamp
     return ret;
 }
 
-static int i_uds_init(uds_context_t *ctx, const uds_config_t *config, uint8_t *response_buffer,
-                      size_t response_buffer_len, void *priv, const uds_time_t *timestamp)
+static uds_err_e i_uds_init(uds_context_t *ctx, const uds_config_t *config,
+                            uint8_t *response_buffer, size_t response_buffer_len,
+                            void *priv, const uds_time_t *timestamp)
 {
-    int ret = 0;
+    uds_err_e ret = UDS_NO_ERROR;
 
     // Init context
     (void)memset(ctx, 0, sizeof(uds_context_t));
@@ -3898,45 +3987,54 @@ static int i_uds_init(uds_context_t *ctx, const uds_config_t *config, uint8_t *r
 
     uds_trace(ctx, __func__, NULL, 0);
 
+    if (config->cb_send == NULL)
+    {
+        uds_err(ctx, "send callback not installed!", NULL, 0);
+        ret = UDS_ERR_GENERIC;
+    }
+
     return ret;
 }
 
-static long int i_uds_time_elapsed_ms(const uds_time_t *stop, const uds_time_t *start)
+static int64_t i_uds_time_elapsed_ms(const uds_time_t *stop, const uds_time_t *start)
 {
-    long int elapsed = 0;
+    int64_t elapsed = 0;
 
     if ((stop->seconds > start->seconds) ||
         ((stop->seconds == start->seconds) && (stop->microseconds >= start->microseconds)))
     {
-        elapsed = 1000L * (stop->seconds - start->seconds);
-        elapsed += ((((long int)stop->microseconds - (long int)start->microseconds) + 500) / 1000);
+        uint32_t us_to_ms;
+        us_to_ms = (((stop->microseconds - start->microseconds) + 500U) / 1000U);
+
+        elapsed = 1000LL * (stop->seconds - start->seconds);
+        elapsed += (int64_t)us_to_ms;
     }
 
     return elapsed;
 }
 
-int uds_init(uds_context_t *ctx, const uds_config_t *config, uint8_t *response_buffer,
+uds_err_e uds_init(uds_context_t *ctx, const uds_config_t *config, uint8_t *response_buffer,
              size_t response_buffer_len, void *priv, const uds_time_t *timestamp)
 {
-    int ret = -1;
+    uds_err_e ret;
 
     if (ctx == NULL)
     {
-        ret = -1;
+        ret = UDS_ERR_GENERIC;
     }
     else if (config == NULL)
     {
-        ret = -1;
+        ret = UDS_ERR_GENERIC;
     }
     else if (response_buffer == NULL)
     {
         uds_err(ctx, "res_buffer shall be supplied to init function", NULL, 0);
-        ret = -1;
+        ret = UDS_ERR_GENERIC;
     }
     else if (response_buffer_len < 7U)
     {
         uds_err(ctx, "res_buffer shall be at least 7 bytes long", NULL, 0);
-        ret = -1;
+        ret = UDS_ERR_GENERIC;
     }
     else
     {
@@ -3950,24 +4048,24 @@ int uds_init(uds_context_t *ctx, const uds_config_t *config, uint8_t *response_b
     return ret;
 }
 
-int uds_receive(uds_context_t *ctx, uds_address_e addr_type, const uint8_t *data, const size_t len,
+uds_err_e uds_receive(uds_context_t *ctx, const uds_address_e addr_type, const uint8_t *data, const size_t len,
                 const uds_time_t *timestamp)
 {
-    int ret = 0;
+    uds_err_e ret;
 
     if (ctx == NULL)
     {
-        ret = -1;
+        ret = UDS_ERR_GENERIC;
     }
     else if (data == NULL)
     {
         uds_err(ctx, "receive called with null data pointer", NULL, 0);
-        ret = -1;
+        ret = UDS_ERR_GENERIC;
     }
     else if (len == 0U)
     {
         uds_err(ctx, "receive called with no data", NULL, 0);
-        ret = -1;
+        ret = UDS_ERR_GENERIC;
     }
     else
     {
@@ -3985,7 +4083,7 @@ int uds_receive(uds_context_t *ctx, uds_address_e addr_type, const uint8_t *data
     }
 
     // Update last contact timestamp
-    if ((ret == 0) && (timestamp != NULL))
+    if ((ret == UDS_NO_ERROR) && (timestamp != NULL))
     {
         (void)memcpy(&ctx->last_message_timestamp, timestamp, sizeof(ctx->last_message_timestamp));
     }
@@ -3993,20 +4091,21 @@ int uds_receive(uds_context_t *ctx, uds_address_e addr_type, const uint8_t *data
     return ret;
 }
 
-int uds_cycle(uds_context_t *ctx, const uds_time_t *timestamp)
+uds_err_e uds_cycle(uds_context_t *ctx, const uds_time_t *timestamp)
 {
-    long int elapsed_ms = 0;
+    int64_t elapsed_ms;
 
     elapsed_ms = i_uds_time_elapsed_ms(timestamp, &ctx->last_message_timestamp);
-    if ((elapsed_ms > 0) && (ctx->current_session != NULL) && (ctx->current_session->s3_time > 0U))
+    if ((elapsed_ms > 0) && (ctx->current_session != NULL) &&
+        (ctx->current_session->s3_timeout_ms > 0U))
     {
-        if ((unsigned long)elapsed_ms > ctx->current_session->s3_time)
+        if (elapsed_ms > (int64_t)ctx->current_session->s3_timeout_ms)
         {
             const uds_security_cfg_t *sec_cfg = NULL;
 
             uds_info(ctx, "session timer expired, reset to default", NULL, 0);
             i_uds_reset_to_default_session(ctx);
-            if (i_uds_sa_vs_session_check(ctx, ctx->current_sa, ctx->current_session) != 0)
+            if (i_uds_sa_vs_session_check(ctx, ctx->current_sa, ctx->current_session) != UDS_NO_ERROR)
             {
                 uds_info(ctx, "secure access not allowed in default session, reset it", NULL, 0);
                 i_uds_reset_secure_access(ctx);
@@ -4032,24 +4131,27 @@ int uds_cycle(uds_context_t *ctx, const uds_time_t *timestamp)
                 break;
             }
 
-            if ((sec_cfg != NULL) && (i_uds_session_and_security_check(ctx, sec_cfg) != 0))
+            if (sec_cfg != NULL)
             {
-                i_uds_data_transfer_reset(ctx);
+                if (i_uds_session_and_security_check(ctx, sec_cfg) != UDS_NO_ERROR)
+                {
+                    i_uds_data_transfer_reset(ctx);
+                }
             }
         }
     }
 
-    if (i_uds_security_access_max_attempts_exceeded(ctx) != 0)
+    if (i_uds_security_access_max_attempts_exceeded(ctx))
     {
         elapsed_ms = i_uds_time_elapsed_ms(timestamp, &ctx->sa_delay_timer_timestamp);
-        if ((elapsed_ms > 0) && ((unsigned long)elapsed_ms >= ctx->config->sa_delay_timer_ms))
+        if ((elapsed_ms > 0) && (elapsed_ms >= ctx->config->sa_delay_timer_ms))
         {
             uds_info(ctx, "SA delay timer expired, reset attempts number", NULL, 0);
             i_uds_security_access_reset_failed_attempts(ctx);
         }
     }
 
-    return 0;
+    return UDS_NO_ERROR;
 }
 
 void uds_reset_sa_delay_timer(uds_context_t *ctx)

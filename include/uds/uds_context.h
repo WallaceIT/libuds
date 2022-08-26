@@ -40,7 +40,7 @@ typedef struct
     const uds_session_cfg_t *current_session;
     uint8_t current_sa_seed;
     const uds_sa_cfg_t *current_sa;
-    unsigned long sa_failed_attempts;
+    uint16_t sa_failed_attempts;
     uds_time_t sa_delay_timer_timestamp;
 
     struct
@@ -50,7 +50,6 @@ typedef struct
             uint8_t pdid;
             uint8_t transmission_mode;
         } data[UDS_CONFIG_NUM_PERIODIC_SLOTS];
-        int last_data;
     } periodic;
 
     struct

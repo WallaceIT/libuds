@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -58,7 +59,7 @@ static int can_tp_init(const char *interface, uint32_t rx_id, uint32_t tx_id, bo
     struct can_isotp_fc_options fcopts;
     int fd;
 
-    fd = socket(PF_CAN, SOCK_DGRAM, CAN_ISOTP);
+    fd = socket(PF_CAN, (int)SOCK_DGRAM, CAN_ISOTP);
     if (fd < 0)
     {
         fprintf(stderr, "Failed to create CAN_ISOTP socket: %s\n", strerror(errno));
@@ -203,18 +204,22 @@ static int timer_reset(int fd)
 
 static int signal_management_handle(int signo, bool *terminate)
 {
+    int ret;
+
     switch (signo)
     {
     case SIGTERM:
         *terminate = true;
+        ret = 0;
         break;
 
     default:
         fprintf(stderr, "Unhandled signal %d\n", signo);
+        ret = -1;
         break;
     }
 
-    return 0;
+    return ret;
 }
 
 static int signal_management_init(void)
@@ -268,14 +273,14 @@ static const uds_session_cfg_t uds_sessions[] = {
     {
         .session_type = 0x02, // Programming Session
         .sa_type_mask = UDS_CFG_SA_TYPE_ALL,
-        .s3_time = 3000,
+        .s3_timeout_ms = 5000,
         .p2_timeout_ms = 65535,
         .p2star_timeout_ms = 65535,
     },
     {
         .session_type = 0x03, // Extended Diagnostic Session
         .sa_type_mask = UDS_CFG_SA_TYPE_ALL,
-        .s3_time = 3000,
+        .s3_timeout_ms = 5000,
         .p2_timeout_ms = 500,
         .p2star_timeout_ms = 1000,
     },
@@ -287,19 +292,26 @@ static const uds_session_cfg_t uds_sessions[] = {
     },
 };
 
-static int uds_send_callback(void *priv, const uint8_t data[], size_t len)
+static uds_err_e uds_send_callback(void *priv, const uint8_t data[], size_t len)
 {
     struct private_data *private_data = (struct private_data *)priv;
     size_t int_len = len;
-    int ret;
+    uds_err_e err = UDS_NO_ERROR;
 
-    ret = can_tp_send(private_data->fd_can_tp_phys, data, &int_len);
+    if (can_tp_send(private_data->fd_can_tp_phys, data, &int_len) != 0)
+    {
+        err = UDS_ERR_GENERIC;
+    }
+    else if (int_len < len)
+    {
+        err = UDS_ERR_GENERIC;
+    }
 
-    return ret;
+    return err;
 }
 
-static int sa_request_seed(void *priv, const uint8_t sa_index, const uint8_t in_data[],
-                           size_t in_data_len, uint8_t out_seed[], size_t *out_seed_len)
+static uds_err_e sa_request_seed(void *priv, const uint8_t sa_index, const uint8_t in_data[],
+                                 size_t in_data_len, uint8_t out_seed[], size_t *out_seed_len)
 {
     (void)priv;
     (void)sa_index;
@@ -314,7 +326,8 @@ static int sa_request_seed(void *priv, const uint8_t sa_index, const uint8_t in_
     return 0;
 }
 
-static int sa_validate_key(void *priv, const uint8_t sa_index, const uint8_t key[], size_t key_len)
+static uds_err_e sa_validate_key(void *priv, const uint8_t sa_index, const uint8_t key[],
+                                 size_t key_len)
 {
     (void)priv;
     (void)sa_index;
@@ -332,7 +345,7 @@ static const uds_sa_cfg_t sas[] = {
     }
 };
 
-static int data_read(void *priv, uint16_t identifier, uint8_t *data, size_t *len)
+static uds_err_e data_read(void *priv, uint16_t identifier, uint8_t *data, size_t *len)
 {
     struct private_data *private_data = (struct private_data *)priv;
     int ret = -1;
@@ -355,7 +368,7 @@ static int data_read(void *priv, uint16_t identifier, uint8_t *data, size_t *len
     return ret;
 }
 
-static int data_write(void *priv, uint16_t identifier, const uint8_t *data, const size_t len)
+static uds_err_e data_write(void *priv, uint16_t identifier, const uint8_t *data, const size_t len)
 {
     struct private_data *private_data = (struct private_data *)priv;
     int ret = -1;
@@ -393,8 +406,8 @@ static const uds_config_data_t data_items[] = {
     }
 };
 
-static int mem_region_read(void *priv, const uintptr_t address, uint8_t *data,
-                           const size_t data_len)
+static uds_err_e mem_region_read(void *priv, const uintptr_t address, uint8_t *data,
+                                 const size_t data_len)
 {
     (void)priv;
     (void)address;
@@ -404,8 +417,8 @@ static int mem_region_read(void *priv, const uintptr_t address, uint8_t *data,
     return 0;
 }
 
-static int mem_region_write(void *priv, const uintptr_t address, const uint8_t *data,
-                            const size_t data_len)
+static uds_err_e mem_region_write(void *priv, const uintptr_t address, const uint8_t *data,
+                                  const size_t data_len)
 {
     (void)priv;
     (void)address;
@@ -415,9 +428,9 @@ static int mem_region_write(void *priv, const uintptr_t address, const uint8_t *
     return 0;
 }
 
-static int mem_region_download_request(void *priv, const uintptr_t address, const size_t data_len,
-                                       const uint8_t compression_method,
-                                       const uint8_t encrypting_method)
+static uds_err_e mem_region_download_request(void *priv, const uintptr_t address, const size_t data_len,
+                                             const uint8_t compression_method,
+                                             const uint8_t encrypting_method)
 {
     (void)priv;
     (void)address;
@@ -428,8 +441,8 @@ static int mem_region_download_request(void *priv, const uintptr_t address, cons
     return 0;
 }
 
-static int mem_region_download(void *priv, const uintptr_t address, const uint8_t *data,
-                               const size_t data_len)
+static uds_err_e mem_region_download(void *priv, const uintptr_t address, const uint8_t *data,
+                                     const size_t data_len)
 {
     (void)priv;
     (void)address;
@@ -439,7 +452,7 @@ static int mem_region_download(void *priv, const uintptr_t address, const uint8_
     return 0;
 }
 
-static int mem_region_download_exit(void *priv)
+static uds_err_e mem_region_download_exit(void *priv)
 {
     (void)priv;
 
@@ -472,10 +485,10 @@ static const uds_config_memory_region_t mem_regions[] = {
 static char buf_path[4096];
 static size_t cur_offset = 0;
 
-static int file_transfer_open(void *priv, const char *filepath, size_t filepath_len,
-                              uds_file_mode_e mode, intptr_t *fd, size_t *file_size,
-                              size_t *file_size_compressed, const uint8_t compression_method,
-                              const uint8_t encrypting_method)
+static uds_err_e file_transfer_open(void *priv, const char *filepath, size_t filepath_len,
+                                    uds_file_mode_e mode, intptr_t *fd, size_t *file_size,
+                                    size_t *file_size_compressed, const uint8_t compression_method,
+                                    const uint8_t encrypting_method)
 {
     intptr_t tmp_fd = -1;
     int ret = 0;
@@ -538,7 +551,8 @@ static int file_transfer_open(void *priv, const char *filepath, size_t filepath_
     return ret;
 }
 
-static int file_transfer_list(void *priv, intptr_t fd, size_t offset, void *buf, size_t *count)
+static uds_err_e file_transfer_list(void *priv, intptr_t fd, size_t offset, void *buf,
+                                    size_t *count)
 {
     int ret = 0;
 
@@ -551,7 +565,8 @@ static int file_transfer_list(void *priv, intptr_t fd, size_t offset, void *buf,
     return ret;
 }
 
-static int file_transfer_read(void *priv, intptr_t fd, size_t offset, void *buf, size_t *count)
+static uds_err_e file_transfer_read(void *priv, intptr_t fd, size_t offset, void *buf,
+                                    size_t *count)
 {
     ssize_t ret = 0;
 
@@ -576,8 +591,8 @@ static int file_transfer_read(void *priv, intptr_t fd, size_t offset, void *buf,
     return ret;
 }
 
-static int file_transfer_write(void *priv, intptr_t fd, size_t offset, const void *buf,
-                               size_t count)
+static uds_err_e file_transfer_write(void *priv, intptr_t fd, size_t offset, const void *buf,
+                                     size_t count)
 {
     ssize_t ret = 0;
 
@@ -601,7 +616,7 @@ static int file_transfer_write(void *priv, intptr_t fd, size_t offset, const voi
     return ret;
 }
 
-static int file_transfer_close(void *priv, uds_file_mode_e mode, intptr_t fd)
+static uds_err_e file_transfer_close(void *priv, uds_file_mode_e mode, intptr_t fd)
 {
     int ret = 0;
 
@@ -620,7 +635,7 @@ static int file_transfer_close(void *priv, uds_file_mode_e mode, intptr_t fd)
     return ret;
 }
 
-static int file_transfer_delete(void *priv, const char *filepath, size_t filepath_len)
+static uds_err_e file_transfer_delete(void *priv, const char *filepath, size_t filepath_len)
 {
     (void)priv;
 
@@ -633,13 +648,13 @@ static int file_transfer_delete(void *priv, const char *filepath, size_t filepat
 static uds_loglevel_e current_loglevel = UDS_LOGLVL_WARNING;
 
 static void log_function(void *priv, uds_loglevel_e level, const char *message, const char *arg_name,
-                     unsigned long long arg)
+                         uint64_t arg)
 {
     (void)priv;
 
     if (level >= current_loglevel)
     {
-        static const char * loglevel_names[UDS_LOGLVL_TRACE + 1] = {
+        static const char * loglevel_names[] = {
             [UDS_LOGLVL_ERR]        = "ERROR",
             [UDS_LOGLVL_WARNING]    = "WARNG",
             [UDS_LOGLVL_INFO]       = "INFO ",
@@ -656,7 +671,7 @@ static void log_function(void *priv, uds_loglevel_e level, const char *message, 
 
         if (arg_name != NULL)
         {
-            printf("uds[%s]: %s (%s = 0x%llX)\n", loglevel_name, message, arg_name, arg);
+            printf("uds[%s]: %s (%s = 0x%"PRIX64")\n", loglevel_name, message, arg_name, arg);
         }
         else
         {
@@ -741,8 +756,8 @@ int main(int argc, char *argv[])
     uds_time_t now;
 
     bool run = true;
-    int i = 0;
-    int ret = 0;
+    int i;
+    uds_err_e err;
 
     // Parse command line arguments
     while ((i = getopt(argc, argv, "c:hl:")) >= 0)
@@ -778,12 +793,14 @@ int main(int argc, char *argv[])
     }
 
     // Intialize UDS library
-    ret = uds_init(&uds_ctx, &uds_config, uds_buffer, sizeof(uds_buffer), &private_data, &now);
-    if (ret != 0)
+    err = uds_init(&uds_ctx, &uds_config, uds_buffer, sizeof(uds_buffer), &private_data, &now);
+    if (err != UDS_NO_ERROR)
     {
         fprintf(stderr, "Failed to initialize UDS library\n");
         return -1;
     }
+
+    uds_reset_sa_delay_timer(&uds_ctx);
 
     // Create poller
     epollfd = epoll_create1(0);
@@ -867,6 +884,7 @@ int main(int argc, char *argv[])
     {
         int nfds;
 
+        errno = 0;
         nfds = epoll_wait(epollfd, events, sizeof(events) / sizeof(events[0]), -1);
         if ((nfds == -1) && (errno != EINTR))
         {
@@ -919,7 +937,7 @@ int main(int argc, char *argv[])
                 if (can_tp_receive(private_data.fd_can_tp_phys, can_tp_phys_buf, &size) == 0)
                 {
                     if (uds_receive(&uds_ctx, UDS_ADDRESS_PHYSICAL, can_tp_phys_buf, size,
-                                    &now) != 0)
+                                    &now) != UDS_NO_ERROR)
                     {
                         fprintf(stderr, "Failed to send to CAN-ISOTP\n");
                     }
@@ -935,7 +953,7 @@ int main(int argc, char *argv[])
                 if (can_tp_receive(private_data.fd_can_tp_func, can_tp_func_buf, &size) == 0)
                 {
                     if (uds_receive(&uds_ctx, UDS_ADDRESS_FUNCTIONAL, can_tp_func_buf, size,
-                                    &now) != 0)
+                                    &now) != UDS_NO_ERROR)
                     {
                         fprintf(stderr, "Failed to send to CAN-ISOTP\n");
                     }
