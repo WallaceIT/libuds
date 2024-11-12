@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-only */
+/* SPDX-License-Identifier: MIT */
 /**
  * \file uds_context.h
  *
@@ -7,8 +7,8 @@
  * This header contains the definition of the context data used by libuds.
  * All types and definitions present in this file shall be treated as opaque.
  *
- * \author Francesco Valla <valla.francesco@gmail.com>
- * \copyright (c) 2022 Francesco Valla - License: GPL-3.0-only
+ * \author Francesco Valla <francesco@valla.it>
+ * \copyright (c) 2022-2024 Francesco Valla - License: MIT
  */
 
 #ifndef UDS_CONTEXT_H__

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-only */
+/* SPDX-License-Identifier: MIT */
 /**
  * \file uds.h
  *
@@ -6,8 +6,8 @@
  *
  * This header defines the public interfaces of libuds.
  *
- * \author Francesco Valla <valla.francesco@gmail.com>
- * \copyright (c) 2022 Francesco Valla - License: GPL-3.0-only
+ * \author Francesco Valla <francesco@valla.it>
+ * \copyright (c) 2022-2024 Francesco Valla - License: MIT
  */
 
 #ifndef UDS_H__

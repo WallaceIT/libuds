@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-3.0-only */
+/* SPDX-License-Identifier: MIT */
 /**
  * \file iso14229_part1.h
  *
@@ -6,8 +6,8 @@
  *
  * This header contains values defined by the ISO14229-1 document.
  *
- * \author Francesco Valla <valla.francesco@gmail.com>
- * \copyright (c) 2022 Francesco Valla - License: GPL-3.0-only
+ * \author Francesco Valla <francesco@valla.it>
+ * \copyright (c) 2022-2024 Francesco Valla - License: MIT
  */
 
 #ifndef ISO14229_PART1_H__

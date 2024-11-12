@@ -1,7 +1,7 @@
-/* SPDX-License-Identifier: GPL-3.0-only */
+/* SPDX-License-Identifier: MIT */
 /*
  * This file is part of libuds.
- * Copyright (C) 2022 Francesco Valla <valla.francesco@gmail.com>
+ * Copyright (C) 2022 Francesco Valla <francesco@valla.it>
  */
 
 #include <dirent.h>
