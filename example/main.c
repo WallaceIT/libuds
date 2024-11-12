@@ -490,7 +490,7 @@ static uds_err_e file_transfer_open(void *priv, const char *filepath, size_t fil
                                     size_t *file_size_compressed, const uint8_t compression_method,
                                     const uint8_t encrypting_method)
 {
-    intptr_t tmp_fd = -1;
+    int tmp_fd = -1;
     int ret = 0;
 
     (void)priv;
@@ -529,12 +529,7 @@ static uds_err_e file_transfer_open(void *priv, const char *filepath, size_t fil
     }
     else if (mode == UDS_FILE_MODE_LIST_DIR)
     {
-        DIR *d;
-        d = opendir(buf_path);
-        if (d != NULL)
-        {
-            tmp_fd = (intptr_t)d;
-        }
+        tmp_fd = open(buf_path, O_RDONLY);
     }
 
     if (tmp_fd < 0)
@@ -543,7 +538,7 @@ static uds_err_e file_transfer_open(void *priv, const char *filepath, size_t fil
     }
     else
     {
-        *fd = tmp_fd;
+        *fd = (intptr_t)tmp_fd;
 
         cur_offset = 0;
     }
@@ -574,12 +569,12 @@ static uds_err_e file_transfer_read(void *priv, intptr_t fd, size_t offset, void
 
     if (cur_offset != offset)
     {
-        ret = lseek(fd, offset, SEEK_SET);
+        ret = lseek((int)fd, offset, SEEK_SET);
     }
 
     if (ret == 0)
     {
-        ret = read(fd, buf, *count);
+        ret = read((int)fd, buf, *count);
         if (ret > 0)
         {
             *count = ret;
@@ -600,12 +595,12 @@ static uds_err_e file_transfer_write(void *priv, intptr_t fd, size_t offset, con
 
     if (cur_offset != offset)
     {
-        ret = lseek(fd, offset, SEEK_SET);
+        ret = lseek((int)fd, offset, SEEK_SET);
     }
 
     if (ret == 0)
     {
-        ret = write(fd, buf, count);
+        ret = write((int)fd, buf, count);
         if (ret == (ssize_t)count)
         {
             cur_offset = (offset + count);
@@ -624,12 +619,11 @@ static uds_err_e file_transfer_close(void *priv, uds_file_mode_e mode, intptr_t 
 
     if (mode == UDS_FILE_MODE_LIST_DIR)
     {
-        DIR *d = (DIR *)fd;
-        ret = closedir(d);
+        ret = closedir(fdopendir((int)fd));
     }
     else
     {
-        ret = close(fd);
+        ret = close((int)fd);
     }
 
     return ret;
