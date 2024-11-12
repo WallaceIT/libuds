@@ -827,11 +827,11 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Create timer for ISO-TP module
+    // Create timer for UDS library
     fd_timer_uds = timer_init(MS_TO_US(50));
     if (fd_timer_uds < 0)
     {
-        fprintf(stderr, "Failed to init timer for ISO-TP\n");
+        fprintf(stderr, "Failed to init timer for UDS\n");
     }
     else
     {
@@ -840,7 +840,7 @@ int main(int argc, char *argv[])
         ev.data.fd = fd_timer_uds;
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, fd_timer_uds, &ev) == -1)
         {
-            fprintf(stderr, "Cannot add ISO-TP timer to epoll: %s\n", strerror(errno));
+            fprintf(stderr, "Cannot add UDS timer to epoll: %s\n", strerror(errno));
         }
     }
 
