@@ -82,7 +82,7 @@ static inline void i_uds_store_big_endian(uint8_t *dest, uint64_t value, size_t 
 
 static inline uint16_t i_uds_load_uint16_big_endian(const uint8_t *src)
 {
-    return (((uint16_t)src[0] << 8U) | (uint16_t)src[1]);
+    return ((uint16_t)((uint16_t)src[0] << 8U) | (uint16_t)src[1]);
 }
 
 static inline void i_uds_store_uint16_big_endian(uint8_t *dest, uint16_t value)
@@ -259,11 +259,7 @@ static inline uds_err_e i_uds_sa_vs_session_check(const uds_context_t *ctx,
 
     uds_trace(ctx, __func__, NULL, 0);
 
-    if (sa_config == NULL)
-    {
-        ret = UDS_ERR_GENERIC;
-    }
-    else if (session_config == NULL)
+    if ((sa_config == NULL) || (session_config == NULL))
     {
         ret = UDS_ERR_GENERIC;
     }
@@ -719,6 +715,7 @@ static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const uds_time_t *t
 
             uds_debug(ctx, "request seed", "sa_index", sa_index);
 
+            nrc = UDS_NRC_SFNS;
             for (l = 0U; l < ctx->config->num_sa_config; l++)
             {
                 const uds_sa_cfg_t *sa_config = &ctx->config->sa_config[l];
@@ -762,11 +759,6 @@ static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const uds_time_t *t
                     break;
                 }
             }
-
-            if (l == ctx->config->num_sa_config)
-            {
-                nrc = UDS_NRC_SFNS;
-            }
         }
         else if (ctx->current_sa_seed != sa_index)
         {
@@ -779,6 +771,7 @@ static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const uds_time_t *t
 
             uds_debug(ctx, "validate key", "sa_index", sa_index);
 
+            nrc = UDS_NRC_SFNS;
             for (l = 0U; l < ctx->config->num_sa_config; l++)
             {
                 const uds_sa_cfg_t *sa_config = &ctx->config->sa_config[l];
@@ -821,11 +814,6 @@ static uint8_t i_uds_svc_security_access(uds_context_t *ctx, const uds_time_t *t
                     }
                     break;
                 }
-            }
-
-            if (l == ctx->config->num_sa_config)
-            {
-                nrc = UDS_NRC_SFNS;
             }
         }
     }
@@ -968,11 +956,7 @@ static uint8_t i_uds_svc_tester_present(uds_context_t *ctx, const uds_time_t *ti
     UDS_UNUSED(ctx);
     UDS_UNUSED(timestamp);
 
-    if (data_len != 1U)
-    {
-        nrc = UDS_NRC_IMLOIF;
-    }
-    else if (i_uds_get_subfunction(data[0]) != UDS_LEV_ZSUBF)
+    if ((data_len != 1U) || (i_uds_get_subfunction(data[0]) != UDS_LEV_ZSUBF))
     {
         nrc = UDS_NRC_IMLOIF;
     }
@@ -1358,11 +1342,7 @@ static uint8_t i_uds_svc_read_data_by_identifier(uds_context_t *ctx, const uds_t
 
     UDS_UNUSED(timestamp);
 
-    if ((data_len == 0U) || ((data_len % 2U) != 0U))
-    {
-        nrc = UDS_NRC_IMLOIF;
-    }
-    else if ((data_len + (data_len / 2U)) > *res_data_len)
+    if ((data_len == 0U) || ((data_len % 2U) != 0U) || ((data_len + (data_len / 2U)) > *res_data_len))
     {
         /* Available space for response shall fit at least the requested
          * identifiers and at least one additional byte for each of them */
@@ -1515,6 +1495,7 @@ static uint8_t i_uds_svc_read_memory_by_address(uds_context_t *ctx, const uds_ti
                 uds_debug(ctx, "request to read memory", "address", addr);
                 uds_debug(ctx, "request to read memory", "size", size);
 
+                nrc = UDS_NRC_ROOR;
                 for (p = 0U; p < ctx->config->num_mem_regions; p++)
                 {
                     const uds_config_memory_region_t *mem_region = &ctx->config->mem_regions[p];
@@ -1558,7 +1539,6 @@ static uint8_t i_uds_svc_read_memory_by_address(uds_context_t *ctx, const uds_ti
                 if (p == ctx->config->num_mem_regions)
                 {
                     uds_debug(ctx, "memory non found in any region", "address", addr);
-                    nrc = UDS_NRC_ROOR;
                 }
             }
         }
@@ -1755,6 +1735,7 @@ static uint8_t i_uds_svc_write_memory_by_address(uds_context_t *ctx, const uds_t
                 uds_debug(ctx, "request to write memory", "address", addr);
                 uds_debug(ctx, "request to write memory", "size", size);
 
+                nrc = UDS_NRC_ROOR;
                 for (p = 0U; p < ctx->config->num_mem_regions; p++)
                 {
                     const uds_config_memory_region_t *mem_region = &ctx->config->mem_regions[p];
@@ -1799,7 +1780,6 @@ static uint8_t i_uds_svc_write_memory_by_address(uds_context_t *ctx, const uds_t
                 if (p == ctx->config->num_mem_regions)
                 {
                     uds_debug(ctx, "memory non found in any region", "address", addr);
-                    nrc = UDS_NRC_ROOR;
                 }
             }
         }
@@ -1830,6 +1810,7 @@ static uint8_t i_uds_svc_io_control_by_identifier(uds_context_t *ctx, const uds_
 
         uds_debug(ctx, "requested IO control", "DID", identifier);
 
+        nrc = UDS_NRC_ROOR;
         for (d = 0U; d < ctx->config->num_data_items; d++)
         {
             const uds_config_data_t *data_item = &ctx->config->data_items[d];
@@ -1914,11 +1895,6 @@ static uint8_t i_uds_svc_io_control_by_identifier(uds_context_t *ctx, const uds_
                 break;
             }
         }
-
-        if (d == ctx->config->num_data_items)
-        {
-            nrc = UDS_NRC_ROOR;
-        }
     }
 
     uds_trace(ctx, __func__, "nrc", nrc);
@@ -1948,6 +1924,7 @@ static uint8_t i_uds_svc_clear_diagnostic_information(uds_context_t *ctx,
 
         uds_debug(ctx, "requested clear of diagnostic data", "GODTC", godtc);
 
+        nrc = UDS_NRC_ROOR;
         for (d = 0U; d < ctx->config->num_groups_of_dtc; d++)
         {
             const uds_config_group_of_dtc_t *group_of_dtc = &ctx->config->groups_of_dtc[d];
@@ -1975,11 +1952,6 @@ static uint8_t i_uds_svc_clear_diagnostic_information(uds_context_t *ctx,
                 }
                 break;
             }
-        }
-
-        if (d == ctx->config->num_groups_of_dtc)
-        {
-            nrc = UDS_NRC_ROOR;
         }
     }
 
@@ -2176,8 +2148,8 @@ static uint8_t i_uds_rdtci_report_dtc_snapshot_record(uds_context_t *ctx, const 
     {
         uint32_t dtc_number = i_uds_load_uint32_big_endian(&data[0], 3);
         uint8_t record_number = data[3];
-        uint8_t record_start;
-        uint8_t record_stop;
+        uint8_t record_start = 0U;
+        uint8_t record_stop = 0U;
         uint32_t d;
 
         // Check if dtc_number is valid
@@ -2278,8 +2250,8 @@ static uint8_t i_uds_rdtci_report_dtc_stored_data(uds_context_t *ctx, const uint
     else
     {
         uint8_t record_number = data[0];
-        uint8_t record_start;
-        uint8_t record_stop;
+        uint8_t record_start = 0U;
+        uint8_t record_stop = 0U;
         size_t used_data_len = 0U;
         uint8_t r;
 
@@ -2804,8 +2776,7 @@ static uint8_t i_uds_svc_request_download(uds_context_t *ctx, const uds_time_t *
                 uds_debug(ctx, "request to download", "address", addr);
                 uds_debug(ctx, "request to download", "size", size);
 
-                nrc = UDS_NRC_PR;
-
+                nrc = UDS_NRC_ROOR;
                 for (p = 0U; p < ctx->config->num_mem_regions; p++)
                 {
                     const uds_config_memory_region_t *mem_region = &ctx->config->mem_regions[p];
@@ -2850,7 +2821,7 @@ static uint8_t i_uds_svc_request_download(uds_context_t *ctx, const uds_time_t *
                                  * including the service identifier and the data-parameters */
                                 size_t full_block_len = (max_block_len + 2U);
 
-                                res_data[0] = ((uint8_t)size_len << 4U);
+                                res_data[0] = (uint8_t)(size_len << 4U);
                                 i_uds_store_big_endian(&res_data[1], full_block_len, size_len);
                                 *res_data_len = (1U + size_len);
                                 nrc = UDS_NRC_PR;
@@ -2870,7 +2841,6 @@ static uint8_t i_uds_svc_request_download(uds_context_t *ctx, const uds_time_t *
                 if (p == ctx->config->num_mem_regions)
                 {
                     uds_debug(ctx, "download address non found in any region", "address", addr);
-                    nrc = UDS_NRC_ROOR;
                 }
             }
         }
@@ -2932,6 +2902,7 @@ static uint8_t i_uds_svc_request_upload(uds_context_t *ctx, const uds_time_t *ti
                 uds_debug(ctx, "request to upload", "address", addr);
                 uds_debug(ctx, "request to upload", "size", size);
 
+                nrc = UDS_NRC_ROOR;
                 for (p = 0U; p < ctx->config->num_mem_regions; p++)
                 {
                     const uds_config_memory_region_t *mem_region = &ctx->config->mem_regions[p];
@@ -2974,7 +2945,7 @@ static uint8_t i_uds_svc_request_upload(uds_context_t *ctx, const uds_time_t *ti
                                  * including the service identifier and the data-parameters */
                                 size_t full_block_len = (max_block_len + 2U);
 
-                                res_data[0] = ((uint8_t)size_len << 4U);
+                                res_data[0] = (uint8_t)(size_len << 4U);
                                 i_uds_store_big_endian(&res_data[1], full_block_len, size_len);
                                 *res_data_len = (1U + size_len);
                                 nrc = UDS_NRC_PR;
@@ -2994,7 +2965,6 @@ static uint8_t i_uds_svc_request_upload(uds_context_t *ctx, const uds_time_t *ti
                 if (p == ctx->config->num_mem_regions)
                 {
                     uds_debug(ctx, "upload address non found in any region", "address", addr);
-                    nrc = UDS_NRC_ROOR;
                 }
             }
         }
@@ -3084,11 +3054,7 @@ static uint8_t i_uds_transmit_data_upload(uds_context_t *ctx, uint8_t bsqc, uint
     size_t read_data = ctx->data_transfer.max_block_len;
     uds_err_e ret;
 
-    if (*res_data_len == 0U)
-    {
-        nrc = UDS_NRC_ROOR;
-    }
-    else if ((*res_data_len - 1U) < ctx->data_transfer.max_block_len)
+    if ((*res_data_len == 0U) || ((*res_data_len - 1U) < ctx->data_transfer.max_block_len))
     {
         nrc = UDS_NRC_ROOR;
     }
@@ -3979,6 +3945,7 @@ static uds_err_e i_uds_init(uds_context_t *ctx, const uds_config_t *config,
     }
     else
     {
+        uds_warning(ctx, "initial timestamp not supplied", NULL, 0);
         ctx->sa_delay_timer_timestamp.seconds = 0;
         ctx->sa_delay_timer_timestamp.microseconds = 0U;
     }
@@ -4018,30 +3985,12 @@ uds_err_e uds_init(uds_context_t *ctx, const uds_config_t *config, uint8_t *resp
 {
     uds_err_e ret;
 
-    if (ctx == NULL)
+    if ((ctx == NULL) || (config == NULL) || (response_buffer == NULL) || (response_buffer_len < 7U))
     {
-        ret = UDS_ERR_GENERIC;
-    }
-    else if (config == NULL)
-    {
-        ret = UDS_ERR_GENERIC;
-    }
-    else if (response_buffer == NULL)
-    {
-        uds_err(ctx, "res_buffer shall be supplied to init function", NULL, 0);
-        ret = UDS_ERR_GENERIC;
-    }
-    else if (response_buffer_len < 7U)
-    {
-        uds_err(ctx, "res_buffer shall be at least 7 bytes long", NULL, 0);
         ret = UDS_ERR_GENERIC;
     }
     else
     {
-        if (timestamp == NULL)
-        {
-            uds_warning(ctx, "initial timestamp not supplied", NULL, 0);
-        }
         ret = i_uds_init(ctx, config, response_buffer, response_buffer_len, priv, timestamp);
     }
 

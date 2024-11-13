@@ -62,7 +62,7 @@ static int can_tp_init(const char *interface, uint32_t rx_id, uint32_t tx_id, bo
     fd = socket(PF_CAN, (int)SOCK_DGRAM, CAN_ISOTP);
     if (fd < 0)
     {
-        fprintf(stderr, "Failed to create CAN_ISOTP socket: %s\n", strerror(errno));
+        (void)fprintf(stderr, "Failed to create CAN_ISOTP socket: %s\n", strerror(errno));
         return -1;
     }
 
@@ -88,17 +88,17 @@ static int can_tp_init(const char *interface, uint32_t rx_id, uint32_t tx_id, bo
         addr.can_addr.tp.tx_id |= CAN_EFF_FLAG;
         addr.can_addr.tp.rx_id |= CAN_EFF_FLAG;
     }
-    addr.can_ifindex = if_nametoindex(interface);
+    addr.can_ifindex = (int)if_nametoindex(interface);
     if (!addr.can_ifindex)
     {
-        fprintf(stderr, "Failed to find CAN interface %s: %s\n", interface, strerror(errno));
+        (void)fprintf(stderr, "Failed to find CAN interface %s: %s\n", interface, strerror(errno));
         close(fd);
         return -1;
     }
 
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
     {
-        fprintf(stderr, "Failed to bind to interface %s: %s\n", interface, strerror(errno));
+        (void)fprintf(stderr, "Failed to bind to interface %s: %s\n", interface, strerror(errno));
         close(fd);
         return -1;
     }
@@ -161,11 +161,11 @@ static int timer_init(long microseconds)
     fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
     if (fd < 0)
     {
-        fprintf(stderr, "Failed to create timer: %s\n", strerror(errno));
+        (void)fprintf(stderr, "Failed to create timer: %s\n", strerror(errno));
     }
     else if (timerfd_settime(fd, 0, &timer, NULL))
     {
-        fprintf(stderr, "Failed to setup timer: %s\n", strerror(errno));
+        (void)fprintf(stderr, "Failed to setup timer: %s\n", strerror(errno));
         close(fd);
         fd = -1;
     }
@@ -188,21 +188,17 @@ static int timer_reset(int fd)
 
     if (read(fd, &expirations, sizeof(expirations)) < (ssize_t)sizeof(expirations))
     {
-        fprintf(stderr, "Failed to reset timer: %s\n", strerror(errno));
-    }
-    else if (expirations > 0x1FFFFFFF)
-    {
-        ret = 0x1FFFFFFF;
+        (void)fprintf(stderr, "Failed to reset timer: %s\n", strerror(errno));
     }
     else
     {
-        ret = (expirations & INT32_MAX);
+        ret = 0;
     }
 
     return ret;
 }
 
-static int signal_management_handle(int signo, bool *terminate)
+static int signal_management_handle(uint32_t signo, bool *terminate)
 {
     int ret;
 
@@ -214,7 +210,7 @@ static int signal_management_handle(int signo, bool *terminate)
         break;
 
     default:
-        fprintf(stderr, "Unhandled signal %d\n", signo);
+        (void)fprintf(stderr, "Unhandled signal %u\n", signo);
         ret = -1;
         break;
     }
@@ -230,18 +226,18 @@ static int signal_management_init(void)
     if ((sigemptyset(&sigset) < 0) || (sigaddset(&sigset, SIGTERM) < 0) ||
         (sigaddset(&sigset, SIGUSR1) < 0))
     {
-        fprintf(stderr, "Failed to fill sigset: %s\n", strerror(errno));
+        (void)fprintf(stderr, "Failed to fill sigset: %s\n", strerror(errno));
     }
     else
     {
         fd = signalfd(-1, &sigset, O_NONBLOCK | SFD_CLOEXEC);
         if (fd < 0)
         {
-            fprintf(stderr, "Failed to create signalfd: %s\n", strerror(errno));
+            (void)fprintf(stderr, "Failed to create signalfd: %s\n", strerror(errno));
         }
         else if (sigprocmask(SIG_SETMASK, &sigset, NULL) < 0)
         {
-            fprintf(stderr, "Failed to set signal mask: %s\n", strerror(errno));
+            (void)fprintf(stderr, "Failed to set signal mask: %s\n", strerror(errno));
         }
     }
 
@@ -296,15 +292,15 @@ static uds_err_e uds_send_callback(void *priv, const uint8_t data[], size_t len)
 {
     struct private_data *private_data = (struct private_data *)priv;
     size_t int_len = len;
-    uds_err_e err = UDS_NO_ERROR;
+    uds_err_e err;
 
-    if (can_tp_send(private_data->fd_can_tp_phys, data, &int_len) != 0)
+    if ((can_tp_send(private_data->fd_can_tp_phys, data, &int_len) != 0) || (int_len < len))
     {
         err = UDS_ERR_GENERIC;
     }
-    else if (int_len < len)
+    else
     {
-        err = UDS_ERR_GENERIC;
+        err = UDS_NO_ERROR;
     }
 
     return err;
@@ -569,7 +565,7 @@ static uds_err_e file_transfer_read(void *priv, intptr_t fd, size_t offset, void
 
     if (cur_offset != offset)
     {
-        ret = lseek((int)fd, offset, SEEK_SET);
+        ret = lseek((int)fd, (off_t)offset, SEEK_SET);
     }
 
     if (ret == 0)
@@ -595,7 +591,7 @@ static uds_err_e file_transfer_write(void *priv, intptr_t fd, size_t offset, con
 
     if (cur_offset != offset)
     {
-        ret = lseek((int)fd, offset, SEEK_SET);
+        ret = lseek((int)fd, (off_t)offset, SEEK_SET);
     }
 
     if (ret == 0)
@@ -782,7 +778,7 @@ int main(int argc, char *argv[])
 
     if (gettime_uds(&now) != 0)
     {
-        fprintf(stderr, "gettime failed: %s\n", strerror(errno));
+        (void)fprintf(stderr, "gettime failed: %s\n", strerror(errno));
         return -1;
     }
 
@@ -790,7 +786,7 @@ int main(int argc, char *argv[])
     err = uds_init(&uds_ctx, &uds_config, uds_buffer, sizeof(uds_buffer), &private_data, &now);
     if (err != UDS_NO_ERROR)
     {
-        fprintf(stderr, "Failed to initialize UDS library\n");
+        (void)fprintf(stderr, "Failed to initialize UDS library\n");
         return -1;
     }
 
@@ -800,7 +796,7 @@ int main(int argc, char *argv[])
     epollfd = epoll_create1(0);
     if (epollfd == -1)
     {
-        fprintf(stderr, "Cannot create epoll: %s\n", strerror(errno));
+        (void)fprintf(stderr, "Cannot create epoll: %s\n", strerror(errno));
         return -1;
     }
 
@@ -808,7 +804,7 @@ int main(int argc, char *argv[])
     fd_signals = signal_management_init();
     if (fd_signals < 0)
     {
-        fprintf(stderr, "Failed to init signal management\n");
+        (void)fprintf(stderr, "Failed to init signal management\n");
     }
     else
     {
@@ -817,7 +813,7 @@ int main(int argc, char *argv[])
         ev.data.fd = fd_signals;
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, fd_signals, &ev) == -1)
         {
-            fprintf(stderr, "Cannot add signalfd to epoll: %s\n", strerror(errno));
+            (void)fprintf(stderr, "Cannot add signalfd to epoll: %s\n", strerror(errno));
         }
     }
 
@@ -825,7 +821,7 @@ int main(int argc, char *argv[])
     fd_timer_uds = timer_init(MS_TO_US(50));
     if (fd_timer_uds < 0)
     {
-        fprintf(stderr, "Failed to init timer for UDS\n");
+        (void)fprintf(stderr, "Failed to init timer for UDS\n");
     }
     else
     {
@@ -834,7 +830,7 @@ int main(int argc, char *argv[])
         ev.data.fd = fd_timer_uds;
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, fd_timer_uds, &ev) == -1)
         {
-            fprintf(stderr, "Cannot add UDS timer to epoll: %s\n", strerror(errno));
+            (void)fprintf(stderr, "Cannot add UDS timer to epoll: %s\n", strerror(errno));
         }
     }
 
@@ -842,7 +838,7 @@ int main(int argc, char *argv[])
     private_data.fd_can_tp_func = can_tp_init(can_iface, can_tp_func_rx_id, 0, true);
     if (private_data.fd_can_tp_func < 0)
     {
-        fprintf(stderr, "Failed to init CAN-ISOTP FUNC\n");
+        (void)fprintf(stderr, "Failed to init CAN-ISOTP FUNC\n");
     }
     else
     {
@@ -851,7 +847,7 @@ int main(int argc, char *argv[])
         ev.data.fd = private_data.fd_can_tp_func;
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, private_data.fd_can_tp_func, &ev) == -1)
         {
-            fprintf(stderr, "Cannot add CAN-ISOTP FUNC to epoll: %s\n", strerror(errno));
+            (void)fprintf(stderr, "Cannot add CAN-ISOTP FUNC to epoll: %s\n", strerror(errno));
         }
     }
 
@@ -860,7 +856,7 @@ int main(int argc, char *argv[])
                                               can_tp_phys_tx_id, true);
     if (private_data.fd_can_tp_phys < 0)
     {
-        fprintf(stderr, "Failed to init CAN-ISOTP PHYS\n");
+        (void)fprintf(stderr, "Failed to init CAN-ISOTP PHYS\n");
     }
     else
     {
@@ -869,11 +865,11 @@ int main(int argc, char *argv[])
         ev.data.fd = private_data.fd_can_tp_phys;
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, private_data.fd_can_tp_phys, &ev) == -1)
         {
-            fprintf(stderr, "Cannot add CAN-ISOTP PHYS to epoll: %s\n", strerror(errno));
+            (void)fprintf(stderr, "Cannot add CAN-ISOTP PHYS to epoll: %s\n", strerror(errno));
         }
     }
 
-    fprintf(stderr, "Start event loop...\n");
+    (void)fprintf(stderr, "Start event loop...\n");
     while (run)
     {
         int nfds;
@@ -882,15 +878,15 @@ int main(int argc, char *argv[])
         nfds = epoll_wait(epollfd, events, sizeof(events) / sizeof(events[0]), -1);
         if ((nfds == -1) && (errno != EINTR))
         {
-            fprintf(stderr, "Error on epoll_wait: %s\n", strerror(errno));
+            (void)fprintf(stderr, "Error on epoll_wait: %s\n", strerror(errno));
         }
         else if ((nfds == -1) && (errno == EINTR))
         {
-            fprintf(stderr, "epoll_wait interrupted by signal\n");
+            (void)fprintf(stderr, "epoll_wait interrupted by signal\n");
         }
         else if (gettime_uds(&now) != 0)
         {
-            fprintf(stderr, "gettime failed: %s\n", strerror(errno));
+            (void)fprintf(stderr, "gettime failed: %s\n", strerror(errno));
         }
 
         // Process events
@@ -900,7 +896,7 @@ int main(int argc, char *argv[])
 
             if (triggered_fd < 0)
             {
-                fprintf(stderr, "Invalid triggered FD\n");
+                (void)fprintf(stderr, "Invalid triggered FD\n");
                 continue;
             }
             else if (triggered_fd == fd_signals)
@@ -910,16 +906,16 @@ int main(int argc, char *argv[])
 
                 if (read(fd_signals, &siginfo, sizeof(siginfo)) < (ssize_t)sizeof(siginfo))
                 {
-                    fprintf(stderr, "Error reading signalfd: %s\n", strerror(errno));
+                    (void)fprintf(stderr, "Error reading signalfd: %s\n", strerror(errno));
                 }
                 else if (signal_management_handle(siginfo.ssi_signo, &term_req) < 0)
                 {
-                    fprintf(stderr, "Failed to handle signal %u\n", siginfo.ssi_signo);
+                    (void)fprintf(stderr, "Failed to handle signal %u\n", siginfo.ssi_signo);
                 }
 
                 if (term_req)
                 {
-                    fprintf(stderr, "Request to terminate execution\n");
+                    (void)fprintf(stderr, "Request to terminate execution\n");
                     run = false;
                     break;
                 }
@@ -933,12 +929,12 @@ int main(int argc, char *argv[])
                     if (uds_receive(&uds_ctx, UDS_ADDRESS_PHYSICAL, can_tp_phys_buf, size,
                                     &now) != UDS_NO_ERROR)
                     {
-                        fprintf(stderr, "Failed to send to CAN-ISOTP\n");
+                        (void)fprintf(stderr, "Failed to send to CAN-ISOTP\n");
                     }
                 }
                 else
                 {
-                    fprintf(stderr, "Failed to receive from PHYS CAN-ISOTP: %s\n", strerror(errno));
+                    (void)fprintf(stderr, "Failed to receive from PHYS CAN-ISOTP: %s\n", strerror(errno));
                 }
             }
             else if (triggered_fd == private_data.fd_can_tp_func)
@@ -949,12 +945,12 @@ int main(int argc, char *argv[])
                     if (uds_receive(&uds_ctx, UDS_ADDRESS_FUNCTIONAL, can_tp_func_buf, size,
                                     &now) != UDS_NO_ERROR)
                     {
-                        fprintf(stderr, "Failed to send to CAN-ISOTP\n");
+                        (void)fprintf(stderr, "Failed to send to CAN-ISOTP\n");
                     }
                 }
                 else
                 {
-                    fprintf(stderr, "Failed to receive from FUNC CAN-ISOTP: %s\n", strerror(errno));
+                    (void)fprintf(stderr, "Failed to receive from FUNC CAN-ISOTP: %s\n", strerror(errno));
                 }
             }
             else if (triggered_fd == fd_timer_uds)
@@ -965,7 +961,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    fprintf(stderr, "Exiting...\n");
+    (void)fprintf(stderr, "Exiting...\n");
 
     close(epollfd);
 
