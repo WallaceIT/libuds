@@ -341,20 +341,26 @@ static const uds_sa_cfg_t sas[] = {
     }
 };
 
-static uds_err_e data_read(void *priv, uint16_t identifier, uint8_t *data, size_t *len)
+static uds_err_e data_read(void *priv, uint16_t identifier, const uint8_t *in_data,
+                           const size_t in_data_len, size_t *in_data_used_len,
+                           uint8_t *out_data, size_t *out_data_len)
 {
     struct private_data *private_data = (struct private_data *)priv;
     int ret = -1;
 
+    (void)in_data;
+    (void)in_data_len;
+    (void)in_data_used_len;
+
     switch (identifier)
     {
     case 0xF190:
-        if (*len >= 17)
+        if (*out_data_len >= 17)
         {
-            memcpy(data, private_data->data.vin, 17);
+            memcpy(out_data, private_data->data.vin, 17);
             ret = 0;
         }
-        *len = 17;
+        *out_data_len = 17;
         break;
 
     default:

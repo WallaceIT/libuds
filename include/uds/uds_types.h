@@ -176,8 +176,10 @@ typedef struct
     uint16_t identifier;
 
     /* Callback shall return -1 on failure; if failure is due to insufficient
-     *  space, data_len shall also be set to total required space */
-    uds_err_e (*cb_read)(void *priv, uint16_t identifier, uint8_t *data, size_t *data_len);
+     * space, out_data_len shall also be set to total required space */
+    uds_err_e (*cb_read)(void *priv, uint16_t identifier, const uint8_t *in_data,
+                         const size_t in_data_len, size_t *in_data_used_len,
+                         uint8_t *out_data, size_t *out_data_len);
     uds_security_cfg_t sec_read;
 
     uds_err_e (*cb_write)(void *priv, uint16_t identifier, const uint8_t *data,

@@ -1343,7 +1343,7 @@ static uint8_t i_uds_svc_read_data_by_identifier(uds_context_t *ctx, const uds_t
 
     UDS_UNUSED(timestamp);
 
-    if ((data_len == 0U) || ((data_len % 2U) != 0U) || ((data_len + (data_len / 2U)) > *res_data_len))
+    if ((data_len == 0U) || ((data_len + (data_len / 2U)) > *res_data_len))
     {
         /* Available space for response shall fit at least the requested
          * identifiers and at least one additional byte for each of them */
@@ -1353,9 +1353,10 @@ static uint8_t i_uds_svc_read_data_by_identifier(uds_context_t *ctx, const uds_t
     {
         size_t data_start;
         size_t res_data_used = 0U;
+        size_t extra_data_used = 0U;
 
         nrc = UDS_NRC_ROOR;
-        for (data_start = 0U; data_start < data_len; data_start += 2U)
+        for (data_start = 0U; data_start < data_len; data_start += (2U + extra_data_used))
         {
             uint16_t identifier = i_uds_load_uint16_big_endian(&data[data_start]);
             uint16_t d;
@@ -1392,11 +1393,15 @@ static uint8_t i_uds_svc_read_data_by_identifier(uds_context_t *ctx, const uds_t
                         size_t res_data_item_len;
                         uds_err_e ret;
 
+                        /* The read callback might use some extra data */
+                        extra_data_used = 0;
+
                         i_uds_store_uint16_big_endian(&res_data[res_data_used], identifier);
                         res_data_used += 2U;
                         res_data_item_len = *res_data_len - res_data_used;
-                        ret = data_item->cb_read(ctx->priv, identifier, &res_data[res_data_used],
-                                                 &res_data_item_len);
+                        ret = data_item->cb_read(ctx->priv, identifier, &data[data_start + 2],
+                                                 (data_len - data_start - 2), &extra_data_used,
+                                                 &res_data[res_data_used], &res_data_item_len);
                         if ((res_data_used + res_data_item_len) > *res_data_len)
                         {
                             uds_info(ctx, "not enough space for data", "DID", identifier);
