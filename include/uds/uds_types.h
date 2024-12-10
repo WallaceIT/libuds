@@ -83,6 +83,12 @@ typedef enum
     UDS_ERR_BUSY = -2,
 } uds_err_e;
 
+typedef enum
+{
+    UDS_ADDRESS_PHYSICAL,
+    UDS_ADDRESS_FUNCTIONAL,
+} uds_address_e;
+
 typedef struct
 {
     uint64_t standard_session_mask;
@@ -248,8 +254,8 @@ typedef struct
     /* Shall return -1 on error, 0 on success; in the latter case, record_data_len shall be set to 0
      * if no data is available, or to the number of bytes copied to *record_data */
     uds_err_e (*cb_get_dtc_ext_data_record)(void *priv, uint32_t dtc_number, uint8_t record_number,
-                                                 uint8_t *record_data, size_t *record_data_len);
-  
+                                            uint8_t *record_data, size_t *record_data_len);
+
     /* Shall return -1 on error, 0 on success; in the latter case, record_data_len shall be set to 0
      * if no data is available, or to the number of bytes copied to *record_data */
     uds_err_e (*cb_get_stored_data_record)(void *priv, uint8_t record_number, uint8_t *record_data,
@@ -269,9 +275,10 @@ typedef struct
 
 typedef struct
 {
-    uds_err_e (*cb_open)(void *priv, const char *filepath, size_t filepath_len, uds_file_mode_e mode,
-                         intptr_t *fd, size_t *file_size, size_t *file_size_compressed,
-                         const uint8_t compression_method, const uint8_t encrypting_method);
+    uds_err_e (*cb_open)(void *priv, const char *filepath, size_t filepath_len,
+                         uds_file_mode_e mode, intptr_t *fd, size_t *file_size,
+                         size_t *file_size_compressed, const uint8_t compression_method,
+                         const uint8_t encrypting_method);
 
     uds_err_e (*cb_list)(void *priv, intptr_t fd, size_t offset, void *buf, size_t *count);
 
@@ -306,6 +313,14 @@ typedef struct
 
     uds_err_e (*cb_is_running)(void *priv, uint16_t identifier);
 } uds_config_routine_t;
+
+typedef struct
+{
+    uint8_t subfunction;
+    uds_err_e (*cb_process)(void *priv, const uint8_t session_type, const uint8_t sa_index,
+                            const uint8_t *data, const size_t data_len, uint8_t *res_data,
+                            size_t *res_data_len);
+} uds_config_custom_svc_t;
 
 typedef struct
 {
@@ -346,6 +361,9 @@ typedef struct
 
     const uds_config_routine_t *routines;
     uint16_t num_routines;
+
+    const uds_config_custom_svc_t *custom_services;
+    uint8_t num_custom_services;
 } uds_config_t;
 
 typedef struct
@@ -353,11 +371,5 @@ typedef struct
     int64_t seconds;
     uint32_t microseconds;
 } uds_time_t;
-
-typedef enum
-{
-    UDS_ADDRESS_PHYSICAL,
-    UDS_ADDRESS_FUNCTIONAL,
-} uds_address_e;
 
 #endif // UDS_TYPES_H__

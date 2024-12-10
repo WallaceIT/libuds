@@ -17,6 +17,7 @@
 #include "uds/uds.h"
 #include "uds/uds_config.h"
 #include "uds/uds_context.h"
+#include "uds/uds_types.h"
 
 #include "iso14229_part1.h"
 
@@ -3744,6 +3745,57 @@ static uint8_t i_uds_svc_request_file_transfer(uds_context_t *ctx, const uds_tim
     return nrc;
 }
 
+static uint8_t i_uds_svc_custom(uds_context_t *ctx, const uint8_t service,
+                                const uint8_t *data, size_t data_len,
+                                uint8_t *res_data, size_t *res_data_len)
+{
+    uint8_t nrc = UDS_NRC_SFNS;
+    uint8_t s;
+
+    for (s = 0U; s < ctx->config->num_custom_services; s++)
+    {
+        const uds_config_custom_svc_t *custom_svc = &ctx->config->custom_services[s];
+        if (custom_svc->subfunction == service)
+        {
+            uds_err_e ret;
+            uint8_t sa_index;
+
+            if (ctx->current_sa != NULL)
+            {
+                sa_index = ctx->current_sa->sa_index;
+            }
+            else
+            {
+                sa_index = UDS_INVALID_SA_INDEX;
+            }
+
+            uds_debug(ctx, "custom service", "service", service);
+            ret = custom_svc->cb_process(ctx->priv, ctx->current_session->session_type,
+                                         sa_index, data, data_len, res_data, res_data_len);
+
+            switch (ret)
+            {
+            case UDS_NO_ERROR:
+                nrc = UDS_NRC_PR;
+                break;
+            case UDS_ERR_GENERIC:
+                nrc = UDS_NRC_GR;
+                break;
+            case UDS_ERR_BUSY:
+                nrc = UDS_NRC_BRR;
+                break;
+            default:
+                nrc = UDS_NRC_GR;
+                break;
+            }
+
+            break;
+        }
+    }
+
+    return nrc;
+}
+
 static uds_err_e i_uds_process_service(uds_context_t *ctx, const uds_time_t *timestamp,
                                        const uint8_t service, const uint8_t *data, size_t data_len,
                                        const uds_address_e addr_type)
@@ -3881,8 +3933,7 @@ static uds_err_e i_uds_process_service(uds_context_t *ctx, const uds_time_t *tim
         break;
 
     default:
-        uds_warning(ctx, "service not supported", "service", service);
-        nrc = UDS_NRC_SNS;
+        nrc = i_uds_svc_custom(ctx, service, data, data_len, res_data, &res_data_len);
         break;
     }
 
