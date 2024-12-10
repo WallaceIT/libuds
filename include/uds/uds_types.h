@@ -93,7 +93,7 @@ typedef struct
 {
     uint64_t standard_session_mask;
     uint64_t specific_session_mask;
-    uint32_t sa_type_mask;
+    uint64_t sa_type_mask;
 } uds_security_cfg_t;
 
 typedef struct
