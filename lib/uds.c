@@ -1399,8 +1399,8 @@ static uint8_t i_uds_svc_read_data_by_identifier(uds_context_t *ctx, const uds_t
                         i_uds_store_uint16_big_endian(&res_data[res_data_used], identifier);
                         res_data_used += 2U;
                         res_data_item_len = *res_data_len - res_data_used;
-                        ret = data_item->cb_read(ctx->priv, identifier, &data[data_start + 2],
-                                                 (data_len - data_start - 2), &extra_data_used,
+                        ret = data_item->cb_read(ctx->priv, identifier, &data[data_start + 2U],
+                                                 (data_len - data_start - 2U), &extra_data_used,
                                                  &res_data[res_data_used], &res_data_item_len);
                         if ((res_data_used + res_data_item_len) > *res_data_len)
                         {
@@ -1840,7 +1840,7 @@ static uint8_t i_uds_svc_io_control_by_identifier(uds_context_t *ctx, const uds_
                 }
                 else if (i_uds_security_check(ctx, &data_item->sec_write) != UDS_NO_ERROR)
                 {
-                    uds_debug(ctx, "I/O control not allowed with current SA", "DID", identifier);
+                    uds_debug(ctx, "IO control not allowed with current SA", "DID", identifier);
                     nrc = UDS_NRC_SAD;
                 }
                 else
@@ -4029,7 +4029,7 @@ static int64_t i_uds_time_elapsed_ms(const uds_time_t *stop, const uds_time_t *s
         uint32_t us_to_ms;
         us_to_ms = (((stop->microseconds - start->microseconds) + 500U) / 1000U);
 
-        elapsed = 1000LL * (stop->seconds - start->seconds);
+        elapsed = 1000LL * (int64_t)(stop->seconds - start->seconds);
         elapsed += (int64_t)us_to_ms;
     }
 
