@@ -370,7 +370,7 @@ static inline uds_err_e i_uds_session_and_security_check(uds_context_t *ctx,
 
 static inline void i_uds_data_transfer_reset(uds_context_t *ctx)
 {
-    uds_info(ctx, "data transfer reset", NULL, 0);
+    uds_debug(ctx, "data transfer reset", NULL, 0);
 
     ctx->data_transfer.direction = UDS_DATA_TRANSFER_NONE;
     ctx->data_transfer.mem_region = NULL;
